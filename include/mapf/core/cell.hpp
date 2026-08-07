@@ -9,4 +9,8 @@ namespace mapf {
         bool isFree;
     };
 
+    void printCell(Cell* cell) {
+        std::cout << "(" << cell->position.x << ", " << cell->position.y << ")" << std::endl;
+    }
+
 }
