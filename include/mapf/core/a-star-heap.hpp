@@ -8,9 +8,7 @@
 namespace mapf {
 
     struct CompareAStarNode {
-        bool operator()(const AStarNode& v1, const AStarNode& v2) {
-            return v1.f > v2.f;
-        }
+        bool operator()(const AStarNode& v1, const AStarNode& v2) const;
     };
 
     using AStarHeap = std::priority_queue<AStarNode, std::vector<AStarNode>, CompareAStarNode>;
