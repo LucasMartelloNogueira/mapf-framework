@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(mapf
+    src/mapf/utils.cpp
     src/mapf/core/a-star-heap.cpp
     src/mapf/core/cell.cpp
     src/mapf/core/grid.cpp
