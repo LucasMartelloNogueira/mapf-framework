@@ -32,11 +32,14 @@ int main() {
     mapf::Grid grid(&free_cells, rows, cols);
     mapf::AStarSolver aStarSolver;
     mapf::AStarSippSolver sippSolver;
+    std::vector<std::list<mapf::Cell*>> otherAgentPaths;
 
     // info agente 1
     mapf::Cell* start1 = grid.getCellPtr(5, 4);
     mapf::Cell* end1 = grid.getCellPtr(2, 4);
-    std::list<mapf::Cell*> path1 = aStarSolver.solve(grid, start1, end1);
+    std::list<mapf::Cell*> path1 = sippSolver.solve(grid, start1, end1, otherAgentPaths);
+    otherAgentPaths.push_back(path1);
+
 
     std::printf("caminho 1:\n");
     printPath(path1);
@@ -44,20 +47,24 @@ int main() {
     // info agente 2
     mapf::Cell* start2 = grid.getCellPtr(4, 1);
     mapf::Cell* end2 = grid.getCellPtr(4, 7);
-    std::list<mapf::Cell*> path2 = aStarSolver.solve(grid, start2, end2);
+    std::list<mapf::Cell*> path2 = sippSolver.solve(grid, start2, end2, otherAgentPaths);
+    otherAgentPaths.push_back(path2);
 
     std::printf("caminho 2:\n");
     printPath(path2);
 
     // info agente 3
     // o que queremos testar
-    std::vector<std::list<mapf::Cell*>> otherAgentPaths = {path1, path2};
     mapf::Cell* start3 = grid.getCellPtr(4, 5);
     mapf::Cell* end3 = grid.getCellPtr(4, 1);
     std::list<mapf::Cell*> path3 = sippSolver.solve(grid, start3, end3, otherAgentPaths);
+    otherAgentPaths.push_back(path3);
 
     std::printf("caminho 3:\n");
     printPath(path3);
+
+    bool isValidSolution = validateSolution(otherAgentPaths);
+    std::printf("is valid solution = %s\n", isValidSolution ? "true" : "false");
     
     return 0;
 }
