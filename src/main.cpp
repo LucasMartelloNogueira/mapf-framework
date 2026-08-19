@@ -40,7 +40,6 @@ int main() {
     std::list<mapf::Cell*> path1 = sippSolver.solve(grid, start1, end1, otherAgentPaths);
     otherAgentPaths.push_back(path1);
 
-
     std::printf("caminho 1:\n");
     printPath(path1);
 
@@ -65,6 +64,27 @@ int main() {
 
     bool isValidSolution = validateSolution(otherAgentPaths);
     std::printf("is valid solution = %s\n", isValidSolution ? "true" : "false");
+
+
+    // teste validação para conflitos de aresta
+    // agente 1
+    mapf::Cell* start4 = grid.getCellPtr(5, 4);
+    mapf::Cell* end4 = grid.getCellPtr(2, 4);
+    std::list<mapf::Cell*> path4 = aStarSolver.solve(grid, start4, end4);
+
+    std::printf("caminho 4:\n");
+    printPath(path4);
+
+    mapf::Cell* start5 = grid.getCellPtr(4, 4);
+    mapf::Cell* end5 = grid.getCellPtr(7, 4);
+    std::list<mapf::Cell*> path5 = aStarSolver.solve(grid, start5, end5);
+
+    std::printf("caminho 5:\n");
+    printPath(path5);
+    
+    std::vector<std::list<mapf::Cell*>> paths = {path4, path5};
+    bool isValidSolution2 = validateSolution(paths);
+    std::printf("is valid solution = %s\n", isValidSolution2 ? "true" : "false");
     
     return 0;
 }
