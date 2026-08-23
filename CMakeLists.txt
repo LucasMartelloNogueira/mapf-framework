@@ -11,6 +11,8 @@ add_library(mapf
     src/mapf/core/a-star-heap.cpp
     src/mapf/core/cell.cpp
     src/mapf/core/grid.cpp
+    src/mapf/core/instance.cpp
+    src/mapf/core/result.cpp
     src/mapf/pathfinding/a_star.cpp
     src/mapf/pathfinding/a_star_sipp.cpp
     src/mapf/pathfinding/sipp/compare_sipp_node.cpp
@@ -18,6 +20,7 @@ add_library(mapf
     src/mapf/pathfinding/sipp/edge_key_hash.cpp
     src/mapf/pathfinding/sipp/state_key.cpp
     src/mapf/pathfinding/sipp/state_key_hash.cpp
+    src/mapf/solvers/priority_planning_solver.cpp
 )
 
 target_include_directories(mapf
@@ -34,4 +37,41 @@ add_executable(mapf_app
 target_link_libraries(mapf_app
     PRIVATE
         mapf
+)
+
+add_library(mapf_experiment_utils
+    src/mapf/experiments/experiment_utils.cpp
+)
+
+target_link_libraries(mapf_experiment_utils
+    PUBLIC
+        mapf
+)
+
+target_include_directories(mapf_experiment_utils
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/mapf/experiments
+)
+
+target_compile_definitions(mapf_experiment_utils
+    PUBLIC
+        MAPF_REPOSITORY_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
+)
+
+add_executable(manual_experiment
+    src/mapf/experiments/manual_experiment.cpp
+)
+
+target_link_libraries(manual_experiment
+    PRIVATE
+        mapf_experiment_utils
+)
+
+add_executable(benchmark_experiment
+    src/mapf/experiments/benchmark_experiment.cpp
+)
+
+target_link_libraries(benchmark_experiment
+    PRIVATE
+        mapf_experiment_utils
 )

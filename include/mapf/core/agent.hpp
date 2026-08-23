@@ -1,12 +1,11 @@
-#include <string>
-#include "position.hpp"
-
 #pragma once
+
+#include "position.hpp"
 
 namespace mapf {
 
     struct Agent {
-        std::string id;
+        int id;
         Position currentPosition;
         Position startPosition;
         Position goalPosition; 

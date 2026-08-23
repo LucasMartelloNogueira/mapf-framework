@@ -1,9 +1,19 @@
+#pragma once
+
 #include <list>
 #include <vector>
+#include <string>
 
-#include "core/cell.hpp"
+#include "mapf/core/cell.hpp"
 
-void printPath(std::list<mapf::Cell*> path);
+void printPath(const std::list<mapf::Cell*>& path);
 
 
-bool validateSolution(std::vector<std::list<mapf::Cell*>> paths);
+bool validateSolution(const std::vector<std::list<mapf::Cell*>>& paths);
+
+
+bool writeResultsToCsvFile(
+    const std::string& outputFilename,
+    const std::list<std::string>& headers,
+    const std::list<std::string>& rowValues
+);

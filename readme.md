@@ -34,4 +34,14 @@ Rode o executavel:
 
     ./build/mapf_app
 
+Rode o experimento manual:
+
+    ./build/manual_experiment
+
+Rode o experimento de benchmark:
+
+    ./build/benchmark_experiment
+
+Os experimentos escrevem um arquivo CSV na pasta `results/`, com nome no formato `{nome_branch_git}_{timestamp_seconds}_results.csv`.
+
 Bibliotecas externas podem ser adicionadas no `CMakeLists.txt` com `find_package(...)` e vinculadas aos targets com `target_link_libraries(...)`.

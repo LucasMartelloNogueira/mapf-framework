@@ -65,13 +65,12 @@ namespace mapf {
 
         for (int y = 0; y < rows; y++) {
             for (int x = 0; x < cols; x++) {
-                int matrixRow = rows - 1 - y;
                 Position position {
                     .x = x,
                     .y = y
                 };
 
-                int isFree = (*free)[matrixRow][x];
+                int isFree = (*free)[y][x];
 
                 Cell cell {
                     .position = position,
@@ -133,7 +132,7 @@ namespace mapf {
     }
 
     void Grid::printGrid() {
-        for (int y = rows - 1; y >= 0; y--) {
+        for (int y = 0; y < rows; y++) {
             for (int x = 0; x < cols; x++) {
                 int index = y * cols + x;
                 Cell cell = cells[index];

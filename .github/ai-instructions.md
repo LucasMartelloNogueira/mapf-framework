@@ -27,7 +27,7 @@
     - the prompt saved must be the entire prompt given by the user and without any modifications
   
   6. Save data for audit
-    - the first thing saved in each plan is a datetime of when if was created, the author (the user loged in vscode / copilot) and the time it was last updated
+    - the first thing saved in each plan is a datetime of when if was created, the author (the user loged in vscode / copilot/ codex), the time it was last updated and the AI model that was used
 
   7. Save alterations to the plan
     - after the user makes adjustments to the plan, save the adjustments in a section called "adjusments"
@@ -77,7 +77,7 @@
     - Use a directory called `docs/` at the root of the project to store documentation files.
   
   5. Save data for audit
-    - the first thing saved in each plan is a datetime of when if was created, the author (the user loged in vscode / copilot), the time it was last updated and the AI model used
+    - the first thing saved in each plan is a datetime of when if was created, the author (the user loged in vscode / copilot/ codex), the time it was last updated and the AI model that was used
 
   6. Save alterations to the plan
     - after the user makes adjustments to the plan, save the adjustments in a section called "adjusments"
