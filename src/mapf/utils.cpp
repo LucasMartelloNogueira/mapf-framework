@@ -4,15 +4,23 @@
 #include <fstream>
 #include <sstream>
 #include <string>
-#include <unordered_set>
 #include <unordered_map>
 #include <vector>
-#include <format>
 
 namespace {
+    struct GoalOccupancy {
+        int arrivalTime;
+    };
+
     std::string positionTimeKey(mapf::Cell* cell, int time) {
         std::ostringstream output;
         output << cell->position.x << "-" << cell->position.y << "-" << time;
+        return output.str();
+    }
+
+    std::string positionKey(mapf::Cell* cell) {
+        std::ostringstream output;
+        output << cell->position.x << "-" << cell->position.y;
         return output.str();
     }
 
@@ -68,66 +76,64 @@ void printPath(const std::list<mapf::Cell*>& path) {
 }
 
 bool validateSolution(const std::vector<std::list<mapf::Cell*>>& paths) {
-    std::unordered_map<std::string, int> goalVerticeColisions;
-    std::unordered_set<std::string> verticeColisions;
-    std::unordered_set<std::string> edgeColisions;
+    mapf::SolutionConflicts conflicts = getCollision(paths);
+    return conflicts.cellConflicts.empty() && conflicts.edgeConflicts.empty();
+}
 
-    int i = 0;
+mapf::SolutionConflicts getCollision(const std::vector<std::list<mapf::Cell*>>& paths) {
+    mapf::SolutionConflicts conflicts;
+    std::unordered_map<std::string, GoalOccupancy> goalVertexLookup;
+    std::unordered_map<std::string, mapf::Cell*> vertexLookup;
+    std::unordered_map<std::string, mapf::Cell*> edgeLookup;
+
     for (const std::list<mapf::Cell*>& path : paths) {
+        if (path.empty()) {
+            continue;
+        }
 
         int t = 0;
         mapf::Cell* previousCell = nullptr;
 
         for (mapf::Cell* cell : path) {
-            
-            std::string verticeKey = std::format("{}-{}", cell->position.x, cell->position.y);
+            std::string vertexKey = positionKey(cell);
 
-            if (goalVerticeColisions.contains(verticeKey)) {
-                const int verticeArrivalTime = goalVerticeColisions[verticeKey];
-                if (verticeArrivalTime <= t) {
-                    std::printf("conflito na celula %s: agente chegou no tempo %d mas outro já havia terminado no tempo %d\n", verticeKey.c_str(), t, verticeArrivalTime);
-                    return false;
-                }
+            auto goalVertexLookupItem = goalVertexLookup.find(vertexKey);
+            if (goalVertexLookupItem != goalVertexLookup.end() && goalVertexLookupItem->second.arrivalTime <= t) {
+                conflicts.cellConflicts.push_back({*cell, t});
             }
 
-            std::string verticeAtTime = positionTimeKey(cell, t);
+            std::string vertexTimeKey = positionTimeKey(cell, t);
 
-            if (verticeColisions.contains(verticeAtTime)) {
-
-                std::printf("ja contem o vertice no timesetp %s, i = %d\n", verticeAtTime.c_str(), i);
-                return false;
+            if (vertexLookup.contains(vertexTimeKey)) {
+                conflicts.cellConflicts.push_back({*cell, t});
             }
 
-            verticeColisions.insert(verticeAtTime);
+            vertexLookup.insert({vertexTimeKey, cell});
 
-            // checking edge conflict
             if (t > 0) {
-                std::string edge = edgeTimeKey(cell, previousCell, t);
-                std::string invertedEdge = edgeTimeKey(previousCell, cell, t);
+                std::string edge = edgeTimeKey(previousCell, cell, t);
+                std::string invertedEdge = edgeTimeKey(cell, previousCell, t);
 
-                if (edgeColisions.contains(edge) || edgeColisions.contains(invertedEdge)) {
-                    std::printf("aresta %s já foi usada no tempo %d\n", edge.c_str(), t);
-                    return false;
+                if (edgeLookup.contains(invertedEdge)) {
+                    conflicts.edgeConflicts.push_back({*previousCell, *cell, t});
                 }
 
-                edgeColisions.insert(edge);
+                edgeLookup.insert({edge, cell});
             }
+
             previousCell = cell;
             t++;
         }
 
-        std::string endVerticeKey = std::format("{}-{}", previousCell->position.x, previousCell->position.y);
-        goalVerticeColisions.insert({endVerticeKey, t-1});
-        i++;
+        std::string endVertexKey = positionKey(previousCell);
+        int arrivalTime = static_cast<int>(path.size()) - 1;
+        goalVertexLookup.insert({endVertexKey, {arrivalTime}});
     }
 
-    return true;
+    return conflicts;
 }
 
 
-// bool validateSolution(const std::vector<std::list<mapf::Cell*>>& paths) {
-
-// }
 
 
 bool writeResultsToCsvFile(
