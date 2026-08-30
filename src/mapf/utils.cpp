@@ -5,7 +5,9 @@
 #include <sstream>
 #include <string>
 #include <unordered_set>
+#include <unordered_map>
 #include <vector>
+#include <format>
 
 namespace {
     std::string positionTimeKey(mapf::Cell* cell, int time) {
@@ -66,6 +68,7 @@ void printPath(const std::list<mapf::Cell*>& path) {
 }
 
 bool validateSolution(const std::vector<std::list<mapf::Cell*>>& paths) {
+    std::unordered_map<std::string, int> goalVerticeColisions;
     std::unordered_set<std::string> verticeColisions;
     std::unordered_set<std::string> edgeColisions;
 
@@ -77,6 +80,16 @@ bool validateSolution(const std::vector<std::list<mapf::Cell*>>& paths) {
 
         for (mapf::Cell* cell : path) {
             
+            std::string verticeKey = std::format("{}-{}", cell->position.x, cell->position.y);
+
+            if (goalVerticeColisions.contains(verticeKey)) {
+                const int verticeArrivalTime = goalVerticeColisions[verticeKey];
+                if (verticeArrivalTime <= t) {
+                    std::printf("conflito na celula %s: agente chegou no tempo %d mas outro já havia terminado no tempo %d\n", verticeKey.c_str(), t, verticeArrivalTime);
+                    return false;
+                }
+            }
+
             std::string verticeAtTime = positionTimeKey(cell, t);
 
             if (verticeColisions.contains(verticeAtTime)) {
@@ -102,11 +115,20 @@ bool validateSolution(const std::vector<std::list<mapf::Cell*>>& paths) {
             previousCell = cell;
             t++;
         }
+
+        std::string endVerticeKey = std::format("{}-{}", previousCell->position.x, previousCell->position.y);
+        goalVerticeColisions.insert({endVerticeKey, t-1});
         i++;
     }
 
     return true;
 }
+
+
+// bool validateSolution(const std::vector<std::list<mapf::Cell*>>& paths) {
+
+// }
+
 
 bool writeResultsToCsvFile(
     const std::string& outputFilename,

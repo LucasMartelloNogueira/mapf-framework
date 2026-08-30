@@ -85,6 +85,52 @@ int main() {
     // std::vector<std::list<mapf::Cell*>> paths = {path4, path5};
     // bool isValidSolution2 = validateSolution(paths);
     // std::printf("is valid solution = %s\n", isValidSolution2 ? "true" : "false");
+
+    // teste de validação de conflito quando agente fica parado no destino
+
+    std::vector<std::vector<int>> free_cells = {
+        {1, 1, 1, 1, 1, 1, 1, 1, 1},
+        {1, 1, 1, 1, 1, 1, 1, 1, 1},
+        {1, 1, 1, 1, 1, 1, 1, 1, 1},
+        {1, 1, 1, 1, 1, 1, 1, 1, 1},
+        {1, 1, 1, 1, 1, 1, 1, 1, 1},
+        {1, 1, 1, 1, 1, 1, 1, 1, 1},
+    };
+
+    int rows = free_cells.size();
+    int cols = free_cells[0].size();
+
+    std::printf("rows: %d\n", rows);
+    std::printf("cols: %d\n", cols);
+
+    mapf::Grid grid(&free_cells, rows, cols);
+    // mapf::AStarSippSolver sippSolver;
+    mapf::AStarSolver aStarSolver;
+    std::vector<std::list<mapf::Cell*>> paths;
+    // agente 1
+
+    mapf::Cell* start5 = grid.getCellPtr(4, 0);
+    mapf::Cell* end5 = grid.getCellPtr(4, 2);
+    // std::list<mapf::Cell*> path5 = sippSolver.solve(grid, start5, end5, paths);
+    std::list<mapf::Cell*> path5 = aStarSolver.solve(grid, start5, end5);
+    paths.push_back(path5);
+
+    std::printf("path agente 1\n");
+    printPath(path5);
+
+
+    mapf::Cell* start6 = grid.getCellPtr(0, 2);
+    mapf::Cell* end6 = grid.getCellPtr(8, 2);
+    // std::list<mapf::Cell*> path6 = sippSolver.solve(grid, start6, end6, paths);
+    std::list<mapf::Cell*> path6 = aStarSolver.solve(grid, start6, end6);
     
+
+    paths.push_back(path6);
+    std::printf("path agente 2\n");
+    printPath(path6);
+
+    bool isValid = validateSolution(paths);
+    std::printf("is valid: %s\n", isValid ? "true" : "false");
+
     return 0;
 }

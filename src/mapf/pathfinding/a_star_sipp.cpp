@@ -312,4 +312,6 @@ namespace mapf {
         return {};
     }
 
+
+    // TODO: criar método solve que já recebe SafeIntervalTable como parametro
 }

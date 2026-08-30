@@ -150,4 +150,6 @@ namespace mapf {
         return result;
     }
 
+    // TODO: criar SafeIntervalTable na instancia do PriorityPlanningSolver e criar um metodo solve que para
+    // cada agente, atualiza a SafeIntervalTable e depois passa ela como argumento no novo método solve de AStarSippSolver 
 }
