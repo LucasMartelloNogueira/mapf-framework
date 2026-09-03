@@ -36,7 +36,7 @@
     - Modify the last updated field in the plan after each adjustment
 
   8. Get context
-    - before reading the user prompt, read the files `mapf.md` to get context of the problem
+    - before reading the user prompt, read the files `.github/mapf.md` to get context of the problem
 
 
 - Any time that you need to create a spec.md file for a new feature, follow the instructions below:
