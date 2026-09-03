@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.20)
 
 project(mapf_framework LANGUAGES CXX)
 
+find_package(Threads REQUIRED)
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -20,6 +23,7 @@ add_library(mapf
     src/mapf/pathfinding/sipp/edge_key_hash.cpp
     src/mapf/pathfinding/sipp/state_key.cpp
     src/mapf/pathfinding/sipp/state_key_hash.cpp
+    src/mapf/solvers/local_path_repair_parallel_solver.cpp
     src/mapf/solvers/priority_planning_solver.cpp
 )
 
@@ -28,7 +32,10 @@ target_include_directories(mapf
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Add external libraries with find_package(...) and target_link_libraries(mapf ...).
+target_link_libraries(mapf
+    PUBLIC
+        Threads::Threads
+)
 
 add_executable(mapf_app
     src/main.cpp
@@ -75,3 +82,29 @@ target_link_libraries(benchmark_experiment
     PRIVATE
         mapf_experiment_utils
 )
+
+if(BUILD_TESTING)
+    add_executable(a_star_sipp_test
+        tests/pathfinding/a_star_sipp_test.cpp
+    )
+    target_link_libraries(a_star_sipp_test PRIVATE mapf)
+    target_include_directories(a_star_sipp_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(NAME a_star_sipp_test COMMAND a_star_sipp_test)
+
+    add_executable(utils_collision_test
+        tests/utils_collision_test.cpp
+    )
+    target_link_libraries(utils_collision_test PRIVATE mapf)
+    target_include_directories(utils_collision_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(NAME utils_collision_test COMMAND utils_collision_test)
+
+    add_executable(local_path_repair_parallel_solver_test
+        tests/solvers/local_path_repair_parallel_solver_test.cpp
+    )
+    target_link_libraries(local_path_repair_parallel_solver_test PRIVATE mapf)
+    target_include_directories(local_path_repair_parallel_solver_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(
+        NAME local_path_repair_parallel_solver_test
+        COMMAND local_path_repair_parallel_solver_test
+    )
+endif()

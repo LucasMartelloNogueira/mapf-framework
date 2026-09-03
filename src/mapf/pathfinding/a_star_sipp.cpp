@@ -6,7 +6,6 @@
 #include "mapf/pathfinding/sipp/state_key_hash.hpp"
 
 #include <algorithm>
-#include <limits>
 #include <queue>
 #include <unordered_map>
 #include <unordered_set>
@@ -14,8 +13,6 @@
 namespace mapf {
 
     namespace {
-        constexpr int INF_TIME = std::numeric_limits<int>::max() / 4;
-
         void mergeCollisionIntervals(std::vector<Interval>& intervals) {
             if (intervals.empty()) {
                 return;
@@ -102,15 +99,18 @@ namespace mapf {
 
                 if (t > 0) {
                     Cell* previousCell = path[t - 1];
-                    table.blockedEdgeArrivals[{occupiedCell, previousCell}].insert(t);
+                    if (previousCell != occupiedCell) {
+                        table.blockedEdgeArrivals[{occupiedCell, previousCell}].insert(t);
+                    }
                 }
             }
 
             Cell* goalCell = path.back();
             int lastTime = static_cast<int>(path.size()) - 1;
-            collisionIntervalsByCell[goalCell].push_back({lastTime, INF_TIME});
+            collisionIntervalsByCell[goalCell].push_back({lastTime, SAFE_INTERVAL_INFINITY});
         }
 
+        // TODO: é necessário isso? parece que reserva muito espaço pra nada
         table.safeIntervalsByCell.reserve(grid.getCells().size());
 
         for (Cell& cell : grid.getCells()) {
@@ -126,16 +126,16 @@ namespace mapf {
                     safeIntervals.push_back({currentStart, collision.start - 1});
                 }
 
-                if (collision.end >= INF_TIME) {
-                    currentStart = INF_TIME;
+                if (collision.end >= SAFE_INTERVAL_INFINITY) {
+                    currentStart = SAFE_INTERVAL_INFINITY;
                     break;
                 }
 
                 currentStart = collision.end + 1;
             }
 
-            if (currentStart < INF_TIME) {
-                safeIntervals.push_back({currentStart, INF_TIME});
+            if (currentStart < SAFE_INTERVAL_INFINITY) {
+                safeIntervals.push_back({currentStart, SAFE_INTERVAL_INFINITY});
             }
 
             table.safeIntervalsByCell[cellPtr] = safeIntervals;
@@ -150,17 +150,55 @@ namespace mapf {
         Cell* goal,
         const std::vector<std::list<Cell*>>& otherAgentPaths
     ) {
+        SafeIntervalTable intervalTable = getSafeIntervalsByCell(grid, otherAgentPaths);
+        return solveWithTable(
+            grid,
+            start,
+            goal,
+            intervalTable,
+            0,
+            GoalOccupation::Permanent
+        );
+    }
+
+    std::list<Cell*> AStarSippSolver::solve(
+        Grid& grid,
+        Cell* start,
+        Cell* goal,
+        const SafeIntervalTable& safeIntervalTable,
+        int startTime
+    ) {
+        return solveWithTable(
+            grid,
+            start,
+            goal,
+            safeIntervalTable,
+            startTime,
+            GoalOccupation::Transient
+        );
+    }
+
+    std::list<Cell*> AStarSippSolver::solveWithTable(
+        Grid& grid,
+        Cell* start,
+        Cell* goal,
+        const SafeIntervalTable& intervalTable,
+        int startTime,
+        GoalOccupation goalOccupation
+    ) {
         if (start == nullptr || goal == nullptr) {
             return {};
         }
 
-        if (!start->isFree || !goal->isFree) {
+        if (!start->isFree || !goal->isFree || startTime < 0) {
             return {};
         }
 
-        SafeIntervalTable intervalTable = getSafeIntervalsByCell(grid, otherAgentPaths);
-
-        int startIntervalIndex = findIntervalIndexAtTime(intervalTable.safeIntervalsByCell, start, 0);
+        int startIntervalIndex = findIntervalIndexAtTime(
+            intervalTable.safeIntervalsByCell,
+            start,
+            startTime
+        );
         if (startIntervalIndex == -1) {
             return {};
         }
@@ -179,13 +217,13 @@ namespace mapf {
 
         openHeap.push({
             .key = startKey,
-            .time = 0,
-            .g = 0,
+            .time = startTime,
+            .g = startTime,
             .h = startH,
-            .f = startH
+            .f = startTime + startH
         });
 
-        bestG[startKey] = 0;
+        bestG[startKey] = startTime;
         cameFrom[startKey] = {
             .parent = startKey,
             .hasParent = false
@@ -204,7 +242,25 @@ namespace mapf {
                 continue;
             }
 
-            if (current.key.cell == goal) {
+            const auto currentIntervalsIt = intervalTable.safeIntervalsByCell.find(current.key.cell);
+            if (currentIntervalsIt == intervalTable.safeIntervalsByCell.end()) {
+                continue;
+            }
+
+            const std::vector<Interval>& currentIntervals = currentIntervalsIt->second;
+            if (
+                current.key.intervalIndex < 0 ||
+                current.key.intervalIndex >= static_cast<int>(currentIntervals.size())
+            ) {
+                continue;
+            }
+
+            const Interval& selectedInterval = currentIntervals[current.key.intervalIndex];
+            const bool goalPolicySatisfied =
+                goalOccupation == GoalOccupation::Transient ||
+                selectedInterval.end >= SAFE_INTERVAL_INFINITY;
+
+            if (current.key.cell == goal && goalPolicySatisfied) {
                 std::vector<StateKey> stateSequence;
                 StateKey traceKey = current.key;
 
@@ -243,7 +299,7 @@ namespace mapf {
 
             closedSet.insert(current.key);
 
-            const Interval& currentInterval = intervalTable.safeIntervalsByCell[current.key.cell][current.key.intervalIndex];
+            const Interval& currentInterval = selectedInterval;
             std::list<Cell*> neighbors = grid.getNeighbors(current.key.cell);
 
             for (Cell* neighbor : neighbors) {
@@ -251,13 +307,20 @@ namespace mapf {
                     continue;
                 }
 
-                const std::vector<Interval>& neighborIntervals = intervalTable.safeIntervalsByCell[neighbor];
+                const auto neighborIntervalsIt = intervalTable.safeIntervalsByCell.find(neighbor);
+                if (neighborIntervalsIt == intervalTable.safeIntervalsByCell.end()) {
+                    continue;
+                }
+
+                const std::vector<Interval>& neighborIntervals = neighborIntervalsIt->second;
 
                 for (int neighborIntervalIndex = 0; neighborIntervalIndex < static_cast<int>(neighborIntervals.size()); neighborIntervalIndex++) {
                     const Interval& neighborInterval = neighborIntervals[neighborIntervalIndex];
 
                     int startArrivalTime = current.time + 1;
-                    int endArrivalTime = currentInterval.end >= INF_TIME ? INF_TIME : currentInterval.end + 1;
+                    int endArrivalTime = currentInterval.end >= SAFE_INTERVAL_INFINITY
+                        ? SAFE_INTERVAL_INFINITY
+                        : currentInterval.end + 1;
 
                     if (neighborInterval.start > endArrivalTime || neighborInterval.end < startArrivalTime) {
                         continue;
@@ -311,7 +374,4 @@ namespace mapf {
 
         return {};
     }
-
-
-    // TODO: criar método solve que já recebe SafeIntervalTable como parametro
 }

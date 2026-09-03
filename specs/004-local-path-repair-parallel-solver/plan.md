@@ -1,6 +1,6 @@
 * Created at: 2026-09-02 21:49:35 -03
 * Author: lucas
-* Last updated at: 2026-09-02 21:57:23 -03
+* Last updated at: 2026-09-03 08:01:03 -03
 * AI model used: GPT-5 (Codex)
 
 # Plan: Parallel Initial Planning With Local Path Repair
@@ -377,15 +377,15 @@ After each commit, require measurable progress: the earliest explicit conflict f
 
 ## Suffix Scenario Rules
 
-Let `B` be the first old suffix cell, `G` the agent goal, `originalBTime` its index in the old path, and `newBTime` the bridge arrival time. `hasPotentialSuffixConflict` is true when any cell in old suffix `B..G` has an agent ID other than the active agent in `vertex_agents`. Checking for another ID is more robust than a raw set-size check and is equivalent to the document's `size >= 2` rule when the active path is indexed correctly.
+Let `B` be the first old suffix cell, `G` the agent goal, `originalSuffixArrivalTime` its index in the old path, and `newSuffixArrivalTime` the bridge arrival time. `hasPotentialSuffixConflict` is true when any cell in old suffix `B..G` has an agent ID other than the active agent in `vertex_agents`. Checking for another ID is more robust than a raw set-size check and is equivalent to the document's `size >= 2` rule when the active path is indexed correctly.
 
 | Scenario | Condition | Required behavior |
 | --- | --- | --- |
-| 1 | `newBTime == originalBTime` | Append the old suffix with its original timing. Treat it as valid through the next conflict; if none exists, accept through `G`. |
-| 2.1 | `newBTime < originalBTime` and potential conflict exists | Repeat `B` exactly `originalBTime - newBTime` times, then append the old suffix at its original absolute times. The wait is valid only if `B` remains in one safe interval throughout the wait. If not, reject this window and expand/fallback. |
-| 2.2 | `newBTime < originalBTime` and no potential conflict exists | Append the entire suffix immediately, shifted earlier. No other frozen agent uses its vertices, so no vertex or swap conflict can be introduced there. |
-| 2.3 | `newBTime > originalBTime` and potential conflict exists | Repair the suffix transition by transition using `docs/path_sufix_repair_algorithm.md`. |
-| 2.4 | `newBTime > originalBTime` and no potential conflict exists | Append the entire suffix shifted later. The final cost increases by the delay. |
+| 1 | `newSuffixArrivalTime == originalSuffixArrivalTime` | Append the old suffix with its original timing. Treat it as valid through the next conflict; if none exists, accept through `G`. |
+| 2.1 | `newSuffixArrivalTime < originalSuffixArrivalTime` and potential conflict exists | Repeat `B` exactly `originalSuffixArrivalTime - newSuffixArrivalTime` times, then append the old suffix at its original absolute times. The wait is valid only if `B` remains in one safe interval throughout the wait. If not, reject this window and expand/fallback. |
+| 2.2 | `newSuffixArrivalTime < originalSuffixArrivalTime` and no potential conflict exists | Append the entire suffix immediately, shifted earlier. No other frozen agent uses its vertices, so no vertex or swap conflict can be introduced there. |
+| 2.3 | `newSuffixArrivalTime > originalSuffixArrivalTime` and potential conflict exists | Repair the suffix transition by transition using `docs/path_sufix_repair_algorithm.md`. |
+| 2.4 | `newSuffixArrivalTime > originalSuffixArrivalTime` and no potential conflict exists | Append the entire suffix shifted later. The final cost increases by the delay. |
 
 For scenarios 1 and 2.1, it is acceptable to splice the whole suffix and then find the next conflict immediately; the validated-prefix marker advances only to the cell before that conflict. This produces the same semantics without maintaining a second partial-path representation.
 
@@ -393,7 +393,7 @@ Every combined candidate must be checked against the frozen other paths before c
 
 ## Scenario 2.3: Suffix Repair
 
-Start at `B` at `newBTime` and inspect each original suffix transition `(current, next)`. A cell has potential conflict when `vertex_agents[cell]` contains an ID other than the active agent. Use the reservation table that excludes the active old path.
+Start at `B` at `newSuffixArrivalTime` and inspect each original suffix transition `(current, next)`. A cell has potential conflict when `vertex_agents[cell]` contains an ID other than the active agent. Use the reservation table that excludes the active old path.
 
 | Current cell | Next cell | Operation |
 | --- | --- | --- |
@@ -498,10 +498,24 @@ The task's requested source extension `c` should be implemented as `.cpp`; the c
 - Cover zero threads, unreachable initial path, shared start, duplicate goals, failed repair, empty instance, and start-equals-goal.
 - Require `validateSolution(result.paths)` and empty `remainingConflicts` on every success.
 
+Every individual test scenario in all three test files must have a concise source-code comment immediately before the scenario. The comment must identify the scenario being tested and state its expected behavior or result.
+
 ### `docs/local_path_repair_parallel_solver.md`
 
 - Document the solver API, time/index conventions, reservation semantics, adaptive-window sequence, scenario table, failure behavior, and complexity.
 - Reference the two existing design documents without overwriting them.
+
+### `readme.md`
+
+- Add commands that show how to configure and compile the project.
+- Add the command that runs the complete CTest suite and displays failure output.
+- Document at least these commands:
+
+```bash
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
 
 ## Implementation Sequence
 
@@ -516,7 +530,9 @@ The task's requested source extension `c` should be implemented as `.cpp`; the c
 9. Add full-path permanent-goal SIPP fallback and progress-cycle detection.
 10. Commit path/reservation changes atomically and recalculate costs and metrics.
 11. Validate the final paths with `getCollision` and `validateSolution`.
-12. Add CMake test targets, run the full suite, and document the completed solver.
+12. Add CMake test targets and source comments that identify every test scenario.
+13. Update `readme.md` with the configure, build, and CTest commands.
+14. Run the full suite and document the completed solver.
 
 ## Complexity Expectations
 
@@ -545,6 +561,8 @@ Let `A` be the number of agents, `L` the total finite path length, `V` grid cell
 - Real goals are reserved indefinitely and a successful path ends in a permanently safe interval.
 - A successful result has no remaining conflicts and passes `validateSolution`.
 - Invalid thread counts and endpoint conflicts that cannot be repaired return or throw according to the documented contract without partial state corruption.
+- Every test scenario has a source-code comment identifying the scenario and its expected behavior or result.
+- `readme.md` documents how to configure and compile the project and run all tests with failure output.
 - `cmake --build build` and all CTest targets succeed.
 
 ## Risks And Explicit Decisions
@@ -565,4 +583,33 @@ TODO: Decide in a later API cleanup whether conflict records should directly car
 
 ## Adjustments
 
-No adjustments have been requested yet.
+### adjustment 1
+
+* Adjusted at: 2026-09-03 08:01:03 -03
+
+#### Prompt
+
+```text
+faça as seguintes alterações:
+
+* atualize o readme para botar comandos de como compilar e rodar os testes
+* para cada cenário de teste, bote comentarios falando qual é o cenario testado
+* mude os nomes "newBTime" para "newSuffixArrivalTime  e "originalBTime" para "originalSuffixArrivalTime"
+
+Faça essas alterações nos arquivos specs/004-local-path-repair-parallel-solver/plan.md e specs/004-local-path-repair-parallel-solver/spec.md e grave essas observações na seção "Adjustments" desses arquivos também
+```
+
+#### Changes
+
+- README instructions:
+  - Before: the plan required solver documentation but did not require build and test commands in `readme.md`.
+  - After: `readme.md` must document `cmake -S . -B build`, `cmake --build build`, and `ctest --test-dir build --output-on-failure`.
+- Test scenario documentation:
+  - Before: the plan listed required test coverage without requiring comments for individual scenarios.
+  - After: every test scenario must have a concise source-code comment identifying the scenario and its expected behavior or result.
+- Suffix timing names:
+  - Before: `newBTime` and `originalBTime`.
+  - After: `newSuffixArrivalTime` and `originalSuffixArrivalTime`.
+- Last-updated metadata:
+  - Before: `2026-09-02 21:57:23 -03`.
+  - After: `2026-09-03 08:01:03 -03`.

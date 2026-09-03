@@ -10,6 +10,21 @@
 namespace mapf {
 
     class AStarSippSolver {
+        private:
+            enum class GoalOccupation {
+                Transient,
+                Permanent
+            };
+
+            std::list<Cell*> solveWithTable(
+                Grid& grid,
+                Cell* start,
+                Cell* goal,
+                const SafeIntervalTable& safeIntervalTable,
+                int startTime,
+                GoalOccupation goalOccupation
+            );
+
         public:
             SafeIntervalTable getSafeIntervalsByCell(
                 Grid& grid,
@@ -21,6 +36,14 @@ namespace mapf {
                 Cell* start,
                 Cell* goal,
                 const std::vector<std::list<Cell*>>& otherAgentPaths
+            );
+
+            std::list<Cell*> solve(
+                Grid& grid,
+                Cell* start,
+                Cell* goal,
+                const SafeIntervalTable& safeIntervalTable,
+                int startTime
             );
     };
 

@@ -30,6 +30,17 @@ Compile o executavel:
 
     cmake --build build
 
+## Testes
+
+Partindo da raiz do repositorio, configure e compile o projeto:
+
+    cmake -S . -B build
+    cmake --build build
+
+Execute toda a suite de testes e mostre a saida de qualquer falha:
+
+    ctest --test-dir build --output-on-failure
+
 Rode o executavel:
 
     ./build/mapf_app
