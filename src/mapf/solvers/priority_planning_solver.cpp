@@ -7,149 +7,191 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace mapf {
 
     namespace {
         double elapsedSeconds(std::chrono::steady_clock::time_point startedAt) {
-            const auto finishedAt = std::chrono::steady_clock::now();
-            return std::chrono::duration<double>(finishedAt - startedAt).count();
+            return std::chrono::duration<double>(
+                std::chrono::steady_clock::now() - startedAt
+            ).count();
         }
 
         int pathCost(const std::list<Cell*>& path) {
-            if (path.empty()) {
-                return 0;
-            }
-
-            return static_cast<int>(path.size()) - 1;
+            return path.empty() ? 0 : static_cast<int>(path.size()) - 1;
         }
 
         double calculateInjustice(
-            Grid& grid,
-            const std::vector<const Agent*>& orderedAgents,
+            const std::vector<std::list<Cell*>>& initialPaths,
             const std::vector<std::list<Cell*>>& solutionPaths
         ) {
-            if (orderedAgents.empty()) {
+            std::vector<double> differences;
+            differences.reserve(std::min(initialPaths.size(), solutionPaths.size()));
+
+            double sum = 0.0;
+            const std::size_t pathCount = std::min(initialPaths.size(), solutionPaths.size());
+            for (std::size_t i = 0; i < pathCount; i++) {
+                if (initialPaths[i].empty() || solutionPaths[i].empty()) {
+                    continue;
+                }
+
+                const double difference = static_cast<double>(
+                    pathCost(solutionPaths[i]) - pathCost(initialPaths[i])
+                );
+                differences.push_back(difference);
+                sum += difference;
+            }
+
+            if (differences.empty()) {
                 return 0.0;
             }
 
-            AStarSolver aStarSolver;
-            std::vector<double> diffCostPaths;
-            diffCostPaths.reserve(orderedAgents.size());
-
-            for (int i = 0; i < static_cast<int>(orderedAgents.size()); i++) {
-                const Agent& agent = *orderedAgents[i];
-                Cell* start = grid.getCellPtr(agent.startPosition.x, agent.startPosition.y);
-                Cell* goal = grid.getCellPtr(agent.goalPosition.x, agent.goalPosition.y);
-                std::list<Cell*> optimalPath = aStarSolver.solve(grid, start, goal);
-
-                if (optimalPath.empty()) {
-                    throw std::runtime_error("Could not calculate unconstrained optimal path for agent.");
-                }
-
-                double diffCostPath = static_cast<double>(solutionPaths[i].size()) - static_cast<double>(optimalPath.size());
-                diffCostPaths.push_back(diffCostPath);
-            }
-
-            double sum = 0.0;
-            for (double diffCostPath : diffCostPaths) {
-                sum += diffCostPath;
-            }
-
-            double mean = sum / static_cast<double>(diffCostPaths.size());
+            const double mean = sum / static_cast<double>(differences.size());
             double squaredDistanceSum = 0.0;
-
-            for (double diffCostPath : diffCostPaths) {
-                double distance = diffCostPath - mean;
+            for (double difference : differences) {
+                const double distance = difference - mean;
                 squaredDistanceSum += distance * distance;
             }
 
-            return std::sqrt(squaredDistanceSum / static_cast<double>(diffCostPaths.size()));
+            return std::sqrt(
+                squaredDistanceSum / static_cast<double>(differences.size())
+            );
+        }
+
+        Result summarize(
+            bool requestedSuccess,
+            const std::vector<std::list<Cell*>>& initialPaths,
+            const std::vector<std::list<Cell*>>& paths,
+            std::chrono::steady_clock::time_point startedAt
+        ) {
+            int sumOfCosts = 0;
+            int makespan = 0;
+            bool allPathsExist = initialPaths.size() == paths.size();
+
+            for (const std::list<Cell*>& path : paths) {
+                if (path.empty()) {
+                    allPathsExist = false;
+                    continue;
+                }
+
+                const int cost = pathCost(path);
+                sumOfCosts += cost;
+                makespan = std::max(makespan, cost);
+            }
+
+            return Result(
+                requestedSuccess && allPathsExist && validateSolution(paths),
+                sumOfCosts,
+                makespan,
+                calculateInjustice(initialPaths, paths),
+                elapsedSeconds(startedAt)
+            );
         }
     }
 
     PriorityPlanningSolver::PriorityPlanningSolver(const Instance& instance) :
         instance(instance),
-        result() {}
+        result(),
+        initialPaths(),
+        paths() {}
 
     Result PriorityPlanningSolver::solve(std::list<int> agentsOrder) {
         const auto startedAt = std::chrono::steady_clock::now();
-
         const std::vector<Agent>& agents = instance.getAgents();
-        std::unordered_map<int, const Agent*> agentsById;
-
-        for (const Agent& agent : agents) {
-            agentsById[agent.id] = &agent;
-        }
+        initialPaths.assign(agents.size(), {});
+        paths.assign(agents.size(), {});
 
         if (agentsOrder.size() != agents.size()) {
-            result = Result(false, 0, 0, 0.0, elapsedSeconds(startedAt));
+            result = summarize(false, initialPaths, paths, startedAt);
             return result;
+        }
+
+        std::unordered_map<int, std::size_t> indexesById;
+        indexesById.reserve(agents.size());
+        for (std::size_t i = 0; i < agents.size(); i++) {
+            indexesById.emplace(agents[i].id, i);
         }
 
         std::unordered_set<int> seenIds;
-        std::vector<const Agent*> orderedAgents;
-        orderedAgents.reserve(agentsOrder.size());
-
+        std::vector<std::size_t> orderedIndexes;
+        orderedIndexes.reserve(agents.size());
         for (int agentId : agentsOrder) {
-            if (seenIds.contains(agentId)) {
-                result = Result(false, 0, 0, 0.0, elapsedSeconds(startedAt));
+            const auto agentIt = indexesById.find(agentId);
+            if (!seenIds.insert(agentId).second || agentIt == indexesById.end()) {
+                result = summarize(false, initialPaths, paths, startedAt);
                 return result;
             }
 
-            auto agentIt = agentsById.find(agentId);
-            if (agentIt == agentsById.end()) {
-                result = Result(false, 0, 0, 0.0, elapsedSeconds(startedAt));
-                return result;
-            }
-
-            seenIds.insert(agentId);
-            orderedAgents.push_back(agentIt->second);
+            orderedIndexes.push_back(agentIt->second);
         }
-
-        AStarSippSolver sippSolver;
-        std::vector<std::list<Cell*>> paths;
-        paths.reserve(orderedAgents.size());
 
         Grid& grid = const_cast<Grid&>(instance.getGrid());
-
-        for (const Agent* agent : orderedAgents) {
-            Cell* start = grid.getCellPtr(agent->startPosition.x, agent->startPosition.y);
-            Cell* goal = grid.getCellPtr(agent->goalPosition.x, agent->goalPosition.y);
-
-            std::list<Cell*> path = sippSolver.solve(grid, start, goal, paths);
-            if (path.empty()) {
-                result = Result(false, 0, 0, 0.0, elapsedSeconds(startedAt));
-                return result;
+        bool allInitialPathsExist = true;
+        for (std::size_t i = 0; i < agents.size(); i++) {
+            AStarSolver aStarSolver;
+            Cell* start = grid.getCellPtr(
+                agents[i].startPosition.x,
+                agents[i].startPosition.y
+            );
+            Cell* goal = grid.getCellPtr(
+                agents[i].goalPosition.x,
+                agents[i].goalPosition.y
+            );
+            initialPaths[i] = aStarSolver.solve(grid, start, goal);
+            if (initialPaths[i].empty()) {
+                allInitialPathsExist = false;
             }
-
-            paths.push_back(std::move(path));
         }
 
-        if (!validateSolution(paths)) {
-            result = Result(false, 0, 0, 0.0, elapsedSeconds(startedAt));
+        if (!allInitialPathsExist) {
+            result = summarize(false, initialPaths, paths, startedAt);
             return result;
         }
 
-        int sumOfCosts = 0;
-        int makespan = 0;
+        AStarSippSolver sippSolver;
+        std::vector<std::list<Cell*>> reservedPaths;
+        reservedPaths.reserve(agents.size());
 
-        for (const std::list<Cell*>& path : paths) {
-            int cost = pathCost(path);
-            sumOfCosts += cost;
-            makespan = std::max(makespan, cost);
+        for (std::size_t agentIndex : orderedIndexes) {
+            const Agent& agent = agents[agentIndex];
+            Cell* start = grid.getCellPtr(
+                agent.startPosition.x,
+                agent.startPosition.y
+            );
+            Cell* goal = grid.getCellPtr(
+                agent.goalPosition.x,
+                agent.goalPosition.y
+            );
+
+            std::list<Cell*> path = sippSolver.solve(
+                grid,
+                start,
+                goal,
+                reservedPaths
+            );
+            if (path.empty()) {
+                result = summarize(false, initialPaths, paths, startedAt);
+                return result;
+            }
+
+            paths[agentIndex] = path;
+            reservedPaths.push_back(std::move(path));
         }
 
-        double injustice = calculateInjustice(grid, orderedAgents, paths);
-        result = Result(true, sumOfCosts, makespan, injustice, elapsedSeconds(startedAt));
-
+        result = summarize(true, initialPaths, paths, startedAt);
         return result;
     }
 
-    // TODO: criar SafeIntervalTable na instancia do PriorityPlanningSolver e criar um metodo solve que para
-    // cada agente, atualiza a SafeIntervalTable e depois passa ela como argumento no novo método solve de AStarSippSolver 
+    const std::vector<std::list<Cell*>>& PriorityPlanningSolver::getInitialPaths() const {
+        return initialPaths;
+    }
+
+    const std::vector<std::list<Cell*>>& PriorityPlanningSolver::getPaths() const {
+        return paths;
+    }
+
 }

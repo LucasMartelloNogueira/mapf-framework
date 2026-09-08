@@ -13,6 +13,9 @@
 namespace mapf {
 
     namespace {
+
+        // diminui o numero de intervalos
+        // junta intervalos que tem sobreposição de tempo
         void mergeCollisionIntervals(std::vector<Interval>& intervals) {
             if (intervals.empty()) {
                 return;
@@ -47,6 +50,7 @@ namespace mapf {
             intervals = merged;
         }
 
+        // retorna o intervalo de tempo para uma celula em um instante de tempo
         int findIntervalIndexAtTime(const SafeIntervalsByCell& safeIntervalsByCell, Cell* cell, int time) {
             auto it = safeIntervalsByCell.find(cell);
             if (it == safeIntervalsByCell.end()) {
@@ -256,6 +260,12 @@ namespace mapf {
             }
 
             const Interval& selectedInterval = currentIntervals[current.key.intervalIndex];
+
+            // aqui mostra a necessidade de GoalOccupation::Transient e GoalOccupation::Permanent
+            // Permanent: usado para SIPP normal
+            // Transient: usado no SIPP do reparo local
+            // se for para chegar no destino: tem que ser em um intervalo de tempo no qual o final é infinito, para não ter colisão depois
+            // se for para chegar no destino no reparo local: pode chegar em qualquer intervalo de tempo valido, pois depois o agente vai sair
             const bool goalPolicySatisfied =
                 goalOccupation == GoalOccupation::Transient ||
                 selectedInterval.end >= SAFE_INTERVAL_INFINITY;

@@ -19,7 +19,26 @@ int main() {
     mapf::Result result = solver.solve({0, 1, 2});
 
     const double experimentTimeSeconds = mapf::experiments::elapsedSeconds(startedAt);
-    bool wroteResults = mapf::experiments::writeExperimentResult(instance, result, experimentTimeSeconds);
+    mapf::experiments::ExperimentRunResult run {
+        .metrics = result,
+        .initialPaths = solver.getInitialPaths(),
+        .solutionPaths = solver.getPaths(),
+        .remainingConflicts = mapf::experiments::normalizeConflicts(
+            instance,
+            solver.getPaths()
+        ),
+        .numAgents = instance.getNumAgents(),
+        .solver = "PriorityPlanningSolver",
+        .continueIfFailed = false,
+        .multithreading = false,
+        .numThreads = 1,
+        .localRepair = false
+    };
+    bool wroteResults = mapf::experiments::writeExperimentArtifacts(
+        instance,
+        run,
+        experimentTimeSeconds
+    );
 
     return result.success && wroteResults ? 0 : 1;
 }

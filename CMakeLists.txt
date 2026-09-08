@@ -23,7 +23,9 @@ add_library(mapf
     src/mapf/pathfinding/sipp/edge_key_hash.cpp
     src/mapf/pathfinding/sipp/state_key.cpp
     src/mapf/pathfinding/sipp/state_key_hash.cpp
+    src/mapf/solvers/local_path_repair_iterative_solver.cpp
     src/mapf/solvers/local_path_repair_parallel_solver.cpp
+    src/mapf/solvers/local_path_repair_solver_common.cpp
     src/mapf/solvers/priority_planning_solver.cpp
 )
 
@@ -43,7 +45,7 @@ add_executable(mapf_app
 
 target_link_libraries(mapf_app
     PRIVATE
-        mapf
+        mapf_experiment_utils
 )
 
 add_library(mapf_experiment_utils
@@ -107,4 +109,37 @@ if(BUILD_TESTING)
         NAME local_path_repair_parallel_solver_test
         COMMAND local_path_repair_parallel_solver_test
     )
+
+    add_executable(local_path_repair_iterative_solver_test
+        tests/solvers/local_path_repair_iterative_solver_test.cpp
+    )
+    target_link_libraries(local_path_repair_iterative_solver_test PRIVATE mapf)
+    target_include_directories(local_path_repair_iterative_solver_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(
+        NAME local_path_repair_iterative_solver_test
+        COMMAND local_path_repair_iterative_solver_test
+    )
+
+    add_executable(priority_planning_paths_test
+        tests/solvers/priority_planning_paths_test.cpp
+    )
+    target_link_libraries(priority_planning_paths_test PRIVATE mapf)
+    target_include_directories(priority_planning_paths_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(NAME priority_planning_paths_test COMMAND priority_planning_paths_test)
+
+    add_executable(experiment_utils_test
+        tests/experiments/experiment_utils_test.cpp
+    )
+    target_link_libraries(experiment_utils_test PRIVATE mapf_experiment_utils)
+    target_include_directories(experiment_utils_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(NAME experiment_utils_test COMMAND experiment_utils_test)
+
+    add_executable(cli_test
+        tests/experiments/cli_test.cpp
+        src/main.cpp
+    )
+    target_compile_definitions(cli_test PRIVATE MAPF_CLI_NO_MAIN)
+    target_link_libraries(cli_test PRIVATE mapf_experiment_utils)
+    target_include_directories(cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(NAME cli_test COMMAND cli_test)
 endif()

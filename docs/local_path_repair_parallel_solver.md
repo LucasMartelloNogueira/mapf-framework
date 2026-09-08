@@ -24,12 +24,17 @@ A zero worker count throws `std::invalid_argument`. An instance with no agents r
 `LocalPathRepairResult` contains:
 
 - aggregate `Result` metrics;
+- immutable unconstrained A* paths in `initialPaths`;
 - paths and path costs in `Instance::getAgents()` order;
 - conflicts detected immediately after unconstrained A* planning;
 - conflicts remaining at return time; and
 - the safe intervals, blocked reverse-edge arrivals, vertex-to-agent membership, and permanent goal arrivals derived from the returned paths.
 
 On success, `remainingConflicts` is empty and `validateSolution(paths)` is true. On an algorithmic failure, the result retains the last completely committed paths and rebuilt reservation state for diagnosis.
+
+The shared result and reservation declarations live in
+`mapf/solvers/local_path_repair_solver.hpp`. Including the parallel solver
+header remains sufficient because it includes this neutral header.
 
 ## Time And Path Conventions
 
@@ -50,6 +55,22 @@ The project uses stay-at-target semantics. A complete path may finish only in a 
 The initial phase submits one independent `AStarSolver` task per agent to a bounded C++20 thread pool. Futures are collected in instance order, so task completion order cannot change path ownership. Workers share only read-only grid data, and every task owns its search state.
 
 The pool is joined before reservation construction. All local repairs then run sequentially. While one agent is active, every other current path is frozen and included in the SIPP reservation table.
+
+The sequential repair logic is implemented once in the internal local-repair
+common module. `LocalPathRepairParallelSolver` supplies initial paths from its
+bounded pool; `LocalPathRepairIterativeSolver` supplies the same paths from
+one-at-a-time A* calls on the caller thread. Both then call the common engine,
+so repair order, reservations, fallback behavior, metrics, and failure
+semantics remain identical.
+
+The iterative counterpart is constructed as follows:
+
+```cpp
+#include "mapf/solvers/local_path_repair_iterative_solver.hpp"
+
+mapf::LocalPathRepairIterativeSolver solver(instance);
+mapf::LocalPathRepairResult result = solver.solve();
+```
 
 ## Reservation State
 
@@ -104,6 +125,24 @@ Every move checks the reverse-edge arrival table. Waits must remain inside the c
 If every local anchor fails, SIPP replans from the true source at time zero to the true destination while all other paths remain frozen. This search requires permanent-goal safety and must be conflict-free before commit.
 
 Failure is returned when initial A* cannot reach a goal, fixed starts coincide, permanent goals are duplicated, every local window fails, or complete fallback fails. Failed candidates never partially update committed paths or reservation structures.
+
+Both solvers accept an optional `continueIfFailed` constructor argument, which
+defaults to `false`:
+
+```cpp
+mapf::LocalPathRepairParallelSolver parallel(instance, 4, true);
+mapf::LocalPathRepairIterativeSolver iterative(instance, true);
+```
+
+With the default, an unrepairable conflict returns immediately. With
+continuation enabled, the conflict is fingerprinted and ignored only for the
+unchanged path-state revision, allowing other conflicts and agents to be
+processed. An accepted repair invalidates ignored fingerprints. Before return,
+the engine recomputes `remainingConflicts` from the final paths; conflicts that
+disappeared as a side effect of a later repair are not reported.
+
+Missing initial paths, shared starts, and duplicated permanent goals remain
+terminal because no meaningful continuation pass exists for those conditions.
 
 ## Metrics
 

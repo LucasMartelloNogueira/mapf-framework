@@ -1,58 +1,84 @@
-# Comandos
+# MAPF Framework
 
-## para compilar
+Framework em C++20 para experimentos de Multi-Agent Path Finding (MAPF).
 
-    g++ -std=c++20 -Iinclude \
-      src/main.cpp \
-      src/mapf/core/a-star-heap.cpp \
-      src/mapf/core/cell.cpp \
-      src/mapf/core/grid.cpp \
-      src/mapf/pathfinding/a_star.cpp \
-      src/mapf/pathfinding/a_star_sipp.cpp \
-      src/mapf/pathfinding/sipp/compare_sipp_node.cpp \
-      src/mapf/pathfinding/sipp/edge_key.cpp \
-      src/mapf/pathfinding/sipp/edge_key_hash.cpp \
-      src/mapf/pathfinding/sipp/state_key.cpp \
-      src/mapf/pathfinding/sipp/state_key_hash.cpp \
-      -o bin/main
+## Compilação e testes
 
-## comando para rodar
+```bash
+cmake -S . -B build
+cmake --build build -j2
+ctest --test-dir build --output-on-failure
+```
 
-    ./bin/main
+## CLI de experimentos
 
-## Build system com CMake
+Formato geral:
 
-Configure o projeto:
+```text
+./build/mapf_app -map <mapa> -scen <cenario> -solver <solver> -agents <n> [-threads <t>] [-continue_if_failed <true|false>]
+```
 
-    cmake -S . -B build
+Priority planning:
 
-Compile o executavel:
+```bash
+./build/mapf_app \
+  -map benchmarks/maps/empty-8-8.map \
+  -scen benchmarks/scenarios/empty-8-8/random/empty-8-8-random-1.scen \
+  -solver PriorityPlanningSolver \
+  -agents 3
+```
 
-    cmake --build build
+Reparo local com caminhos iniciais calculados em paralelo:
 
-## Testes
+```bash
+./build/mapf_app \
+  -map benchmarks/maps/den520d.map \
+  -scen benchmarks/scenarios/den520d/random/den520d-random-1.scen \
+  -solver LocalPathRepairParallelSolver \
+  -agents 100 \
+  -threads 8 \
+  -continue_if_failed true
+```
 
-Partindo da raiz do repositorio, configure e compile o projeto:
+Reparo local com caminhos iniciais calculados sequencialmente:
 
-    cmake -S . -B build
-    cmake --build build
+```bash
+./build/mapf_app \
+  -map benchmarks/maps/den520d.map \
+  -scen benchmarks/scenarios/den520d/random/den520d-random-1.scen \
+  -solver LocalPathRepairIterativeSolver \
+  -agents 100 \
+  -continue_if_failed false
+```
 
-Execute toda a suite de testes e mostre a saida de qualquer falha:
+`-threads` é obrigatório somente para `LocalPathRepairParallelSolver`.
+`-continue_if_failed` é aceito somente pelos dois solvers de reparo local e
+assume `false` quando omitido.
 
-    ctest --test-dir build --output-on-failure
+## Resultados
 
-Rode o executavel:
+Cada experimento cria uma pasta própria:
 
-    ./build/mapf_app
+```text
+results/{git_branch}_{timestamp}/
+├── {git_branch}_{timestamp}_stats.csv
+├── {git_branch}_{timestamp}_solution.csv
+└── {git_branch}_{timestamp}_conflicts.csv
+```
 
-Rode o experimento manual:
+O arquivo de conflitos existe somente quando um solver de reparo local termina
+sem sucesso. Resultados parciais continuam disponíveis nos CSVs de estatísticas
+e solução.
 
-    ./build/manual_experiment
+Os schemas, códigos de saída, convenções de custo e comportamento em falhas
+estão detalhados em [`docs/experiment_cli_and_results.md`](docs/experiment_cli_and_results.md).
 
-Rode o experimento de benchmark:
+## Executáveis de exemplo
 
-    ./build/benchmark_experiment
+Os experimentos anteriores continuam disponíveis e usam o mesmo formato de
+artefatos:
 
-Os experimentos escrevem um arquivo CSV na pasta `results/`, com nome no formato `{nome_branch_git}_{timestamp_seconds}_results.csv`.
-
-Bibliotecas externas podem ser adicionadas no `CMakeLists.txt` com `find_package(...)` e vinculadas aos targets com `target_link_libraries(...)`.
+```bash
+./build/manual_experiment
+./build/benchmark_experiment
+```

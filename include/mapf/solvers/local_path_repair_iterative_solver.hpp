@@ -1,21 +1,18 @@
 #pragma once
 
-#include <cstddef>
 #include "mapf/core/instance.hpp"
 #include "mapf/solvers/local_path_repair_solver.hpp"
 
 namespace mapf {
 
-    class LocalPathRepairParallelSolver {
+    class LocalPathRepairIterativeSolver {
         private:
             const Instance& instance;
-            std::size_t numberOfThreads;
             bool continueIfFailed;
 
         public:
-            LocalPathRepairParallelSolver(
+            explicit LocalPathRepairIterativeSolver(
                 const Instance& instance,
-                std::size_t numberOfThreads,
                 bool continueIfFailed = false
             );
 

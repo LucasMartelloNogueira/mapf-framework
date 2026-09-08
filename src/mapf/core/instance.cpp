@@ -172,6 +172,7 @@ namespace mapf {
 
             parsedAgents.push_back({
                 .id = agentId,
+                .scenarioId = bucket,
                 .currentPosition = startPosition,
                 .startPosition = startPosition,
                 .goalPosition = goalPosition

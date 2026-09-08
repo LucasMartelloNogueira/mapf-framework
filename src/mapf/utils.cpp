@@ -43,7 +43,7 @@ namespace {
         return escaped;
     }
 
-    void writeCsvRow(std::ofstream& output, const std::list<std::string>& fields) {
+    void writeCsvRow(std::ofstream& output, const CsvRow& fields) {
         bool first = true;
 
         for (const std::string& field : fields) {
@@ -147,19 +147,19 @@ mapf::SolutionConflicts getCollision(const std::vector<std::list<mapf::Cell*>>& 
 
 
 
-bool writeResultsToCsvFile(
-    const std::string& outputFilename,
-    const std::list<std::string>& headers,
-    const std::list<std::string>& rowValues
+bool writeRowsToCsvFile(
+    const std::filesystem::path& outputPath,
+    const CsvRow& headers,
+    const std::vector<CsvRow>& rows
 ) {
-    std::filesystem::path outputPath(outputFilename);
-
     if (outputPath.extension() != ".csv") {
         return false;
     }
 
-    if (headers.size() != rowValues.size()) {
-        return false;
+    for (const CsvRow& row : rows) {
+        if (headers.size() != row.size()) {
+            return false;
+        }
     }
 
     std::filesystem::path parentPath = outputPath.parent_path();
@@ -177,7 +177,21 @@ bool writeResultsToCsvFile(
     }
 
     writeCsvRow(output, headers);
-    writeCsvRow(output, rowValues);
+    for (const CsvRow& row : rows) {
+        writeCsvRow(output, row);
+    }
 
     return output.good();
+}
+
+bool writeResultsToCsvFile(
+    const std::string& outputFilename,
+    const std::list<std::string>& headers,
+    const std::list<std::string>& rowValues
+) {
+    return writeRowsToCsvFile(
+        std::filesystem::path(outputFilename),
+        CsvRow(headers.begin(), headers.end()),
+        {CsvRow(rowValues.begin(), rowValues.end())}
+    );
 }
