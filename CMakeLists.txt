@@ -9,6 +9,15 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Keep optimized profiling builds symbolized and their call stacks unwindable by
+# perf's frame-pointer collector. Release builds used by normal experiments are
+# intentionally unaffected.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(
+        $<$<CONFIG:RelWithDebInfo>:-fno-omit-frame-pointer>
+    )
+endif()
+
 add_library(mapf
     src/mapf/utils.cpp
     src/mapf/core/a-star-heap.cpp
@@ -142,4 +151,15 @@ if(BUILD_TESTING)
     target_link_libraries(cli_test PRIVATE mapf_experiment_utils)
     target_include_directories(cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     add_test(NAME cli_test COMMAND cli_test)
+
+    find_program(BASH_EXECUTABLE bash)
+    if(BASH_EXECUTABLE)
+        add_test(
+            NAME profiling_scripts_test
+            COMMAND
+                ${BASH_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/profiling_scripts_test.sh
+                ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+    endif()
 endif()

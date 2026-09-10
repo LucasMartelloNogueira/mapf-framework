@@ -70,6 +70,10 @@ bool validateSolution(const std::vector<std::list<mapf::Cell*>>& paths) {
     return conflicts.cellConflicts.empty() && conflicts.edgeConflicts.empty();
 }
 
+// TODO: funcao mto cara, melhorar ela
+//       Esta assim para pegar os conflitos de vertice dos agentes que chegam no destino
+//       trocar por: 1) primeiro pegar todos os instantes e vertices que agentes chegam /
+//                   2) checar for conflitos de vertice (caminhos e agentes parados) e conflitos de arestas
 mapf::SolutionConflicts getCollision(const std::vector<std::list<mapf::Cell*>>& paths) {
     mapf::SolutionConflicts conflicts;
     std::vector<std::vector<mapf::Cell*>> indexedPaths;

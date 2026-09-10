@@ -2,3 +2,10 @@ build/
 task.md
 results/*.csv
 results/*/
+tools/FlameGraph/
+profiling/
+perf*.data
+perf*.stacks
+perf*.folded
+perf*-report.txt
+*-flamegraph.svg

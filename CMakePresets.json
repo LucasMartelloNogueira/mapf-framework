@@ -1,0 +1,53 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 20,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "normal",
+      "displayName": "Normal experiments (Release)",
+      "description": "Optimized build for regular experiments and tests.",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/normal",
+      "cacheVariables": {
+        "BUILD_TESTING": "ON",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "profile",
+      "displayName": "Profiling experiments (RelWithDebInfo)",
+      "description": "Optimized build with debug symbols and frame pointers for perf.",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/profile",
+      "cacheVariables": {
+        "BUILD_TESTING": "OFF",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "normal",
+      "configurePreset": "normal"
+    },
+    {
+      "name": "profile",
+      "configurePreset": "profile"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "normal",
+      "configurePreset": "normal",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}
