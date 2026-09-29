@@ -17,10 +17,19 @@ namespace mapf {
         RESOLVE_BY_TIME
     };
 
+    // Explicit occupancy uses real Agent::id values, not path indexes.
+    using VertexOccupants = std::unordered_map<Cell*,
+        std::unordered_map<int, std::unordered_set<int>>>;
+
+    struct GoalReservation {
+        int agentId;
+        int arrivalTime;
+    };
+
     struct PathReservationState {
         SafeIntervalTable safeIntervalTable;
-        std::unordered_map<Cell*, std::unordered_set<int>> vertex_agents;
-        std::unordered_map<Cell*, int> goal_reservations;
+        VertexOccupants vertex_agents;
+        std::unordered_map<Cell*, GoalReservation> goal_reservations;
     };
 
     struct LocalPathRepairResult {

@@ -107,6 +107,16 @@ if(MAPF_BUILD_COLLISION_BENCHMARK)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(path_reservation_state_test
+        tests/solvers/path_reservation_state_test.cpp
+    )
+    target_link_libraries(path_reservation_state_test PRIVATE mapf)
+    target_include_directories(path_reservation_state_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/mapf/solvers
+    )
+    add_test(NAME path_reservation_state_test COMMAND path_reservation_state_test)
+
     add_executable(a_star_sipp_test
         tests/pathfinding/a_star_sipp_test.cpp
     )

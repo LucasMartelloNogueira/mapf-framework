@@ -3,6 +3,7 @@
 #include "test_support.hpp"
 
 #include <list>
+#include <stdexcept>
 #include <vector>
 
 namespace {
@@ -159,6 +160,38 @@ int main() {
             ).empty(),
             "SIPP accepted a negative absolute start time."
         );
+    }
+
+    // A supplied table must support a complete path whose earliest goal interval
+    // is finite. Rejecting a transient result afterward would miss this solution.
+    {
+        mapf::Grid grid(2, 2);
+        auto* start = grid.getCellPtr(0, 0);
+        auto* goal = grid.getCellPtr(1, 0);
+        auto* auxiliary = grid.getCellPtr(1, 1);
+        std::vector<std::list<mapf::Cell*>> paths {{auxiliary, auxiliary, goal, auxiliary}};
+        mapf::AStarSippSolver solver;
+        const auto table = solver.getSafeIntervalsByCell(grid, paths);
+        using Policy = mapf::AStarSippSolver::GoalOccupation;
+        const auto transient = solver.solve(grid, start, goal, table, 0, Policy::Transient);
+        const auto permanent = solver.solve(grid, start, goal, table, 0, Policy::Permanent);
+        requireTest(transient.size() == 2, "Explicit transient policy changed the early arrival.");
+        requireTest(permanent.size() == 4, "Supplied-table permanent search missed the later arrival.");
+        requireTest(transient == solver.solve(grid, start, goal, table, 0), "Legacy table policy changed.");
+        requireTest(permanent == solver.solve(grid, start, goal, paths), "Permanent overloads disagree.");
+        requireTest(table.safeIntervalsByCell.at(goal).size() == 2, "Searching modified the reservation table.");
+
+        auto finite = table;
+        finite.safeIntervalsByCell.at(goal) = {{0, 1}};
+        requireTest(solver.solve(grid, start, goal, finite, 0, Policy::Permanent).empty(),
+            "Permanent search accepted a goal with no infinite interval.");
+        bool threw = false;
+        try {
+            solver.solve(grid, start, goal, table, 0, static_cast<Policy>(-1));
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+        requireTest(threw, "An invalid goal occupation policy was accepted.");
     }
 
     return 0;

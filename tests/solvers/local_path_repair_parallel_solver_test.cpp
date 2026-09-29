@@ -10,6 +10,18 @@
 #include <vector>
 
 namespace {
+    bool visitedBy(const mapf::PathReservationState& state, mapf::Cell* cell, int agentId) {
+        const auto vertex = state.vertex_agents.find(cell);
+        if (vertex != state.vertex_agents.end()) {
+            for (const auto& [time, occupants] : vertex->second) {
+                if (occupants.contains(agentId)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     mapf::Agent agent(int id, int startX, int startY, int goalX, int goalY) {
         mapf::Position start {.x = startX, .y = startY};
         mapf::Position goal {.x = goalX, .y = goalY};
@@ -104,7 +116,7 @@ int main() {
         requireTest(result.metrics.success, "Equal-time suffix reconnection failed.");
         requireTest(result.pathCosts[0] == 2, "Scenario 1 did not preserve the original path cost.");
         requireTest(validateSolution(result.paths), "Scenario 1 produced an invalid solution.");
-        requireTest(!result.reservations.vertex_agents.at(conflictCell).contains(0), "The replaced path left stale vertex membership.");
+        requireTest(!visitedBy(result.reservations, conflictCell, 0), "The replaced path left stale vertex membership.");
     }
 
     // Scenario: a delayed bridge reaches a suffix goal after another agent leaves it (Scenario 2.3). Expected: the real goal is accepted only in its infinite safe interval.
@@ -144,7 +156,8 @@ int main() {
                 !obsoleteEdge->second.contains(1),
             "The repaired agent's obsolete edge reservation remained committed."
         );
-        requireTest(result.reservations.goal_reservations.at(oldGoal) == result.pathCosts[0], "The repaired goal arrival was not refreshed.");
+        const auto& goal = result.reservations.goal_reservations.at(oldGoal);
+        requireTest(goal.agentId == 7 && goal.arrivalTime == result.pathCosts[0], "The repaired goal owner/arrival was not refreshed.");
     }
 
     // Scenario: a longer path enters a shorter agent's permanently occupied goal. Expected: the moving agent routes around the stay-at-target reservation.
@@ -160,7 +173,7 @@ int main() {
 
         requireTest(result.metrics.success, "The stay-at-target conflict was not repaired.");
         requireTest(validateSolution(result.paths), "Stay-at-target repair returned a conflicting solution.");
-        requireTest(result.reservations.vertex_agents.at(instance.getGrid().getCellPtr(1, 1)).contains(0), "Goal vertex membership lost the owning agent.");
+        requireTest(visitedBy(result.reservations, instance.getGrid().getCellPtr(1, 1), 0), "Goal vertex membership lost the owning agent.");
     }
 
     // Scenario: delayed suffix repair sees no/no, no/potential, potential/no, and potential/potential vertex pairs. Expected: all four Scenario 2.3 transition cases produce one valid path.
@@ -280,7 +293,8 @@ int main() {
 
         requireTest(result.metrics.success, "Start-equals-goal failed.");
         requireTest(result.paths[0].size() == 1 && result.pathCosts[0] == 0, "Start-equals-goal has the wrong path cost.");
-        requireTest(result.reservations.goal_reservations.at(result.paths[0].back()) == 0, "Start-equals-goal reservation has the wrong arrival time.");
+        const auto& goal = result.reservations.goal_reservations.at(result.paths[0].back());
+        requireTest(goal.agentId == 42 && goal.arrivalTime == 0, "Start-equals-goal reservation has the wrong owner/arrival.");
     }
 
     return 0;

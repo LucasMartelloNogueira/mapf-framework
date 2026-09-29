@@ -45,16 +45,16 @@ namespace {
 }
 
 int main() {
-    // Scenario: two shortest paths cross at the center. Expected: both adapters preserve identical initial paths and return the same repaired solution.
-    {
+    // Scenario: two shortest paths cross under either strategy. Expected: both adapters preserve identical initial paths and return the same repaired solution.
+    for (auto strategy : {mapf::LocalRepairStrategy::RESOLVE_BY_AGENT, mapf::LocalRepairStrategy::RESOLVE_BY_TIME}) {
         std::vector<std::vector<int>> freeCells(3, std::vector<int>(3, 1));
         std::vector<mapf::Agent> agents {
             agent(10, 0, 1, 2, 1),
             agent(20, 1, 0, 1, 2)
         };
         mapf::Instance instance(&freeCells, 3, 3, agents);
-        mapf::LocalPathRepairParallelSolver parallel(instance, 2);
-        mapf::LocalPathRepairIterativeSolver iterative(instance);
+        mapf::LocalPathRepairParallelSolver parallel(instance, 2, false, strategy);
+        mapf::LocalPathRepairIterativeSolver iterative(instance, false, strategy);
         mapf::LocalPathRepairResult parallelResult = parallel.solve();
         mapf::LocalPathRepairResult iterativeResult = iterative.solve();
 

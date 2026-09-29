@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <queue>
+#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -172,7 +173,7 @@ namespace mapf {
         const SafeIntervalTable& safeIntervalTable,
         int startTime
     ) {
-        return solveWithTable(
+        return solve(
             grid,
             start,
             goal,
@@ -180,6 +181,23 @@ namespace mapf {
             startTime,
             GoalOccupation::Transient
         );
+    }
+
+    std::list<Cell*> AStarSippSolver::solve(
+        Grid& grid,
+        Cell* start,
+        Cell* goal,
+        const SafeIntervalTable& safeIntervalTable,
+        int startTime,
+        GoalOccupation goalOccupation
+    ) {
+        switch (goalOccupation) {
+        case GoalOccupation::Transient:
+        case GoalOccupation::Permanent:
+            return solveWithTable(grid, start, goal, safeIntervalTable, startTime, goalOccupation);
+        default:
+            throw std::invalid_argument("Unknown SIPP goal occupation policy.");
+        }
     }
 
     std::list<Cell*> AStarSippSolver::solveWithTable(

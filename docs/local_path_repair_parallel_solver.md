@@ -30,7 +30,7 @@ A zero worker count throws `std::invalid_argument`. An instance with no agents r
 - conflicts remaining at return time; and
 - the safe intervals, blocked reverse-edge arrivals, vertex-to-agent membership, and permanent goal arrivals derived from the returned paths.
 
-On success, `remainingConflicts` is empty and `validateSolution(paths)` is true. On an algorithmic failure, the result retains the last completely committed paths and rebuilt reservation state for diagnosis.
+On success, `remainingConflicts` is empty and `validateSolution(paths)` is true. On an algorithmic failure, the result retains the last completely committed paths, conflicts, and reservation state for diagnosis.
 
 The shared result and reservation declarations live in
 `mapf/solvers/local_path_repair_solver.hpp`. Including the parallel solver
@@ -49,6 +49,15 @@ startTime + n - 1
 Repeated cell pointers represent explicit waits. Reverse-edge reservations are indexed by arrival time and prevent opposite-direction swaps.
 
 The project uses stay-at-target semantics. A complete path may finish only in a safe interval that extends through `SAFE_INTERVAL_INFINITY`; its goal is then reserved from the finite arrival timestep onward. A local bridge endpoint is transient and may use a finite safe interval because the repaired suffix leaves it later.
+
+`AStarSippSolver` accepts an explicit policy when reusing a table:
+
+```cpp
+auto path = sipp.solve(grid, start, goal, reservations.safeIntervalTable, 0,
+    mapf::AStarSippSolver::GoalOccupation::Permanent);
+```
+
+The existing five-argument table overload remains transient; the overload accepting other agents' paths remains permanent and constructs its own table. The local engine's full fallback uses the explicit permanent policy with its existing excluded-agent table. For example, a goal safe in `[0,4]` and `[6,+inf]` cannot accept a permanent arrival at 3, even though an intermediate bridge endpoint can. Invalid policy values throw `std::invalid_argument`.
 
 ## Parallel And Sequential Phases
 
@@ -78,14 +87,24 @@ mapf::LocalPathRepairResult result = solver.solve();
 
 - `safeIntervalTable.safeIntervalsByCell` stores the complement of all vertex reservations;
 - `safeIntervalTable.blockedEdgeArrivals` stores reverse directed edges and their blocked arrival times;
-- `vertex_agents` maps every finite path cell to the IDs of agents whose paths visit it; and
-- `goal_reservations` maps each permanent goal to its arrival timestep.
+- `vertex_agents[cell][time]` contains the real `Agent::id` values explicitly visiting that cell at that time, including the last path element; and
+- `goal_reservations[cell]` contains `GoalReservation{agentId, arrivalTime}`, covering the permanent tail.
 
-Before repairing agent `i`, the solver rebuilds a temporary state from every path except `i`. This prevents the obsolete path from blocking its own replacement. After accepting a candidate, the complete state is rebuilt from all paths. Incremental deletion is deliberately avoided because overlapping reservations do not retain per-agent provenance.
+Agent IDs may differ from path indexes: slot 0 can belong to ID 42. The reservation maps use real IDs; conflict events use path indexes. Empty occupancy sets/maps and empty edge-time sets are removed. Every grid cell keeps a safe-interval entry: `[0, SAFE_INTERVAL_INFINITY]` means fully free, and an empty vector means fully blocked. Intervals include both endpoints.
+
+The initial state is built once. Each actual repair attempt makes one complete copy and calls the internal `repairSafeIntervalTable(copy, oldFullPath, agentId)` to exclude that agent. All anchors, suffix checks, and full fallback reuse the same table without changing it during search. After `evaluateCandidate` accepts a complete candidate, `updateReservationState(copy, newFullPath, agentId)` inserts its reservations. Paths, conflicts and reservations are then published together. Rejected attempts discard the copy.
+
+Each helper regenerates safe intervals once per distinct cell in its supplied path, using the union of remaining explicit visits and permanent occupancy. Removing one of two agents at the same time does not free that time. Removing a parked owner also preserves later visits by other agents. Insertion can split intervals, and removal can create, extend or merge them. The complete old and new paths are used so waits shifting a suffix also shift its edge times and goal arrival.
+
+For a move `U -> V` arriving at `t`, the blocked SIPP edge is `{V,U}` at `t`. After exclusion, this entry remains while the owner sets at `(U,t-1)` and `(V,t)` intersect. This preserves shared movements without a separate edge-owner index; waits do not contribute edges.
+
+These internal helpers require a matching complete registered path for removal and prior removal before replacement. Null cells/unsupported lengths throw `std::invalid_argument`; detected ownership mismatches or occupied destination insertion throw `std::logic_error`. Empty paths are no-ops. All contract checks precede mutations; an allocation failure during mutation can leave the disposable copy partial, so it must be discarded. The committed result is never the mutation target.
+
+Spatial potential-conflict queries scan the temporal sets for any other ID, stopping at the first match. This remains conservative; safe intervals and edge blocks provide the time-specific checks. A goal owner's explicit final visit also preserves its spatial membership. The grid and cells remain shared read-only geometry.
 
 ## Conflict Selection And Local Window
 
-Agents are processed in instance order. For each agent, the solver selects its earliest explicit conflict. A virtual stay-at-goal occupant is not selected when another agent enters its goal; the moving path is repaired.
+`RESOLVE_BY_AGENT` (the default) selects the first eligible conflict in instance order. `RESOLVE_BY_TIME` compares eligible conflicts across agents, preserving the shared deterministic ordering. A virtual stay-at-goal occupant has no explicit repair record after its arrival; the moving path is repaired when it enters that goal.
 
 For a vertex conflict at time `tc`, the retained prefix ends at `tc - 1` and the old suffix starts at `tc + 1`. The conflicting cell occurrence is removed. For an edge swap arriving at `tc`, the prefix ends at `tc - 1` and the suffix starts at `tc`; the conflicting transition is replaced.
 
@@ -124,7 +143,7 @@ Every move checks the reverse-edge arrival table. Waits must remain inside the c
 
 If every local anchor fails, SIPP replans from the true source at time zero to the true destination while all other paths remain frozen. This search requires permanent-goal safety and must be conflict-free before commit.
 
-Failure is returned when initial A* cannot reach a goal, fixed starts coincide, permanent goals are duplicated, every local window fails, or complete fallback fails. Failed candidates never partially update committed paths or reservation structures.
+Failure is returned when initial A* cannot reach a goal or both the local attempts and complete fallback fail. Shared starts and duplicate permanent goals are rejected during instance construction. Failed candidates never partially update committed paths or reservation structures.
 
 Both solvers accept an optional `continueIfFailed` constructor argument, which
 defaults to `false`:
@@ -137,9 +156,9 @@ mapf::LocalPathRepairIterativeSolver iterative(instance, true);
 With the default, an unrepairable conflict returns immediately. With
 continuation enabled, the conflict is fingerprinted and ignored only for the
 unchanged path-state revision, allowing other conflicts and agents to be
-processed. An accepted repair invalidates ignored fingerprints. Before return,
-the engine recomputes `remainingConflicts` from the final paths; conflicts that
-disappeared as a side effect of a later repair are not reported.
+processed. An accepted repair invalidates ignored fingerprints and publishes the
+candidate's complete conflict snapshot alongside paths and reservations. The
+final result uses that snapshot, so conflicts removed by a later repair are not reported.
 
 Missing initial paths, shared starts, and duplicated permanent goals remain
 terminal because no meaningful continuation pass exists for those conditions.
@@ -150,9 +169,15 @@ terminal because no meaningful continuation pass exists for those conditions.
 
 ## Complexity
 
-For `A` agents, total finite path length `L`, `V` grid cells, and `R` accepted repair commits:
+For `A` agents, total finite path length `L`, `V` grid cells, and `T` actual repair attempts:
 
 - initial planning runs `A` A* searches with at most the configured worker count active;
-- pairwise time-major collision detection is `O(A^2 * makespan)`;
-- a complete reservation rebuild is `O(V + L log L)` with per-cell interval sorting; and
+- conflict detection indexes explicit occupancy and movements, with additional sorting of per-agent conflict records;
+- the one initial reservation build is bounded by `O(V + L log L)`, with sorting performed per cell;
+- each of the `T` attempts copies the reservation state, costing `O(V + L)` in stored entries under expected hash-table costs;
+- removal/insertion traverse the supplied paths, scan/sort occupancy only at affected cells, and check remaining owners of affected movements; and
 - adaptive local repair performs at most logarithmically many anchor attempts before one complete fallback for a selected conflict.
+
+The temporal owner index increases storage and copy costs. Local regeneration is not simply `O(path length)`: crowded cells and edge endpoint sets require examining other agents too. Candidate path copying, full conflict detection and fingerprinting remain separate costs. See the [consolidated reservation documentation](incremental_path_reservatons.md) for the problem, design decisions, validation, and performance limits.
+
+TODO: Optimize the full state copy and spatial membership scans only after profiling representative workloads.
