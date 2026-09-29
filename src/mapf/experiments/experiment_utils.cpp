@@ -8,9 +8,7 @@
 #include <cmath>
 #include <fstream>
 #include <iomanip>
-#include <map>
 #include <mutex>
-#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <tuple>
@@ -24,52 +22,6 @@
 namespace mapf::experiments {
 
     namespace {
-        struct ConflictKey {
-            int timestep;
-            ConflictType type;
-            int cell1X;
-            int cell1Y;
-            int cell2X;
-            int cell2Y;
-
-            bool operator<(const ConflictKey& other) const {
-                return std::tie(
-                    timestep,
-                    type,
-                    cell1X,
-                    cell1Y,
-                    cell2X,
-                    cell2Y
-                ) < std::tie(
-                    other.timestep,
-                    other.type,
-                    other.cell1X,
-                    other.cell1Y,
-                    other.cell2X,
-                    other.cell2Y
-                );
-            }
-        };
-
-        struct ConflictAccumulator {
-            Cell* cell1;
-            Cell* cell2;
-            std::set<int> agentIds;
-        };
-
-        bool cellComesBefore(const Cell* first, const Cell* second) {
-            return std::tie(first->position.x, first->position.y) <
-                std::tie(second->position.x, second->position.y);
-        }
-
-        Cell* positionAt(const std::vector<Cell*>& path, int timestep) {
-            if (timestep < static_cast<int>(path.size())) {
-                return path[timestep];
-            }
-
-            return path.back();
-        }
-
         std::string sanitizeFilenameComponent(const std::string& input) {
             std::string output;
             output.reserve(input.size());
@@ -206,13 +158,29 @@ namespace mapf::experiments {
                 solver == "LocalPathRepairIterativeSolver";
         }
 
+        std::string strategyName(LocalRepairStrategy strategy) {
+            switch (strategy) {
+            case LocalRepairStrategy::RESOLVE_BY_AGENT:
+                return "RESOLVE_BY_AGENT";
+            case LocalRepairStrategy::RESOLVE_BY_TIME:
+                return "RESOLVE_BY_TIME";
+            default:
+                return "";
+            }
+        }
+
         bool validSolverMetadata(const ExperimentRunResult& run) {
             if (run.solver == "PriorityPlanningSolver") {
                 return
                     !run.continueIfFailed &&
                     !run.multithreading &&
                     run.numThreads == 1 &&
-                    !run.localRepair;
+                    !run.localRepair && !run.localRepairStrategy;
+            }
+
+            if (strategyName(run.localRepairStrategy.value_or(
+                LocalRepairStrategy::RESOLVE_BY_AGENT)).empty()) {
+                return false;
             }
 
             if (run.solver == "LocalPathRepairParallelSolver") {
@@ -284,117 +252,42 @@ namespace mapf::experiments {
             throw std::invalid_argument("Paths must be aligned with instance agents.");
         }
 
-        std::vector<std::vector<Cell*>> indexedPaths;
-        indexedPaths.reserve(paths.size());
-        int makespan = 0;
-
-        for (const std::list<Cell*>& path : paths) {
-            indexedPaths.emplace_back(path.begin(), path.end());
-            if (!path.empty()) {
-                makespan = std::max(makespan, static_cast<int>(path.size()) - 1);
-            }
-        }
-
-        std::map<ConflictKey, ConflictAccumulator> conflicts;
-
-        for (int timestep = 0; timestep <= makespan; timestep++) {
-            for (std::size_t firstIndex = 0; firstIndex < indexedPaths.size(); firstIndex++) {
-                if (indexedPaths[firstIndex].empty()) {
-                    continue;
-                }
-
-                for (
-                    std::size_t secondIndex = firstIndex + 1;
-                    secondIndex < indexedPaths.size();
-                    secondIndex++
-                ) {
-                    if (indexedPaths[secondIndex].empty()) {
-                        continue;
-                    }
-
-                    Cell* firstCell = positionAt(indexedPaths[firstIndex], timestep);
-                    Cell* secondCell = positionAt(indexedPaths[secondIndex], timestep);
-
-                    if (firstCell == secondCell) {
-                        const ConflictKey key {
-                            .timestep = timestep,
-                            .type = ConflictType::Vertex,
-                            .cell1X = firstCell->position.x,
-                            .cell1Y = firstCell->position.y,
-                            .cell2X = firstCell->position.x,
-                            .cell2Y = firstCell->position.y
-                        };
-                        auto [conflict, inserted] = conflicts.try_emplace(
-                            key,
-                            ConflictAccumulator {
-                                .cell1 = firstCell,
-                                .cell2 = firstCell,
-                                .agentIds = {}
-                            }
-                        );
-                        (void) inserted;
-                        conflict->second.agentIds.insert(agents[firstIndex].id);
-                        conflict->second.agentIds.insert(agents[secondIndex].id);
-                    }
-
-                    if (timestep == 0) {
-                        continue;
-                    }
-
-                    Cell* firstPrevious = positionAt(indexedPaths[firstIndex], timestep - 1);
-                    Cell* secondPrevious = positionAt(indexedPaths[secondIndex], timestep - 1);
-                    const bool oppositeDirections =
-                        firstPrevious != firstCell &&
-                        secondPrevious != secondCell &&
-                        firstPrevious == secondCell &&
-                        firstCell == secondPrevious;
-                    if (!oppositeDirections) {
-                        continue;
-                    }
-
-                    Cell* edgeFirst = firstPrevious;
-                    Cell* edgeSecond = firstCell;
-                    if (cellComesBefore(edgeSecond, edgeFirst)) {
-                        std::swap(edgeFirst, edgeSecond);
-                    }
-
-                    const ConflictKey key {
-                        .timestep = timestep,
-                        .type = ConflictType::Edge,
-                        .cell1X = edgeFirst->position.x,
-                        .cell1Y = edgeFirst->position.y,
-                        .cell2X = edgeSecond->position.x,
-                        .cell2Y = edgeSecond->position.y
-                    };
-                    auto [conflict, inserted] = conflicts.try_emplace(
-                        key,
-                        ConflictAccumulator {
-                            .cell1 = edgeFirst,
-                            .cell2 = edgeSecond,
-                            .agentIds = {}
-                        }
-                    );
-                    (void) inserted;
-                    conflict->second.agentIds.insert(agents[firstIndex].id);
-                    conflict->second.agentIds.insert(agents[secondIndex].id);
-                }
-            }
-        }
-
+        const SolutionConflicts snapshot = getCollision(paths);
         std::vector<ConflictRecord> records;
-        records.reserve(conflicts.size());
-        for (const auto& [key, conflict] : conflicts) {
-            records.push_back({
-                .cell1 = conflict.cell1,
-                .cell2 = conflict.cell2,
-                .timestep = key.timestep,
-                .type = key.type,
-                .agentIds = std::vector<int>(
-                    conflict.agentIds.begin(),
-                    conflict.agentIds.end()
-                )
-            });
+        records.reserve(snapshot.vertexEvents.size() + snapshot.edgeEvents.size());
+        for (const std::pair<const CellTime, VertexEvent>& entry : snapshot.vertexEvents) {
+            std::vector<int> agentIds;
+            agentIds.reserve(entry.second.participants.size());
+            for (int pathIndex : entry.second.participants) {
+                agentIds.push_back(agents[static_cast<std::size_t>(pathIndex)].id);
+            }
+            records.push_back({entry.first.cell, entry.first.cell, entry.first.time,
+                ConflictType::Vertex, std::move(agentIds)});
         }
+        for (const std::pair<const EdgeTime, EdgeEvent>& entry : snapshot.edgeEvents) {
+            std::vector<int> agentIds;
+            agentIds.reserve(entry.second.forward.size() + entry.second.reverse.size());
+            for (int pathIndex : entry.second.forward) {
+                agentIds.push_back(agents[static_cast<std::size_t>(pathIndex)].id);
+            }
+            for (int pathIndex : entry.second.reverse) {
+                agentIds.push_back(agents[static_cast<std::size_t>(pathIndex)].id);
+            }
+            records.push_back({entry.first.first, entry.first.second, entry.first.time,
+                ConflictType::Edge, std::move(agentIds)});
+        }
+        for (ConflictRecord& record : records) {
+            std::sort(record.agentIds.begin(), record.agentIds.end());
+            record.agentIds.erase(std::unique(record.agentIds.begin(), record.agentIds.end()),
+                record.agentIds.end());
+        }
+        std::sort(records.begin(), records.end(),
+            [](const ConflictRecord& first, const ConflictRecord& second) {
+                return std::tie(first.timestep, first.type, first.cell1->position.x,
+                    first.cell1->position.y, first.cell2->position.x, first.cell2->position.y) <
+                    std::tie(second.timestep, second.type, second.cell1->position.x,
+                    second.cell1->position.y, second.cell2->position.x, second.cell2->position.y);
+            });
 
         return records;
     }
@@ -434,7 +327,7 @@ namespace mapf::experiments {
         int pathsResolved = 0;
         int sumOfCosts = 0;
         int makespan = 0;
-        CsvRow solutionHeaders = {
+        std::vector<std::string> solutionHeaders = {
             "agent_id",
             "agent_scenario_bucket",
             "start",
@@ -446,7 +339,7 @@ namespace mapf::experiments {
             "success_optimum_path",
             "success_solution_path"
         };
-        std::vector<CsvRow> solutionRows;
+        std::vector<std::vector<std::string>> solutionRows;
         solutionRows.reserve(agents.size());
 
         for (std::size_t i = 0; i < agents.size(); i++) {
@@ -482,7 +375,7 @@ namespace mapf::experiments {
             });
         }
 
-        const CsvRow statsHeaders = {
+        const std::vector<std::string> statsHeaders = {
             "map",
             "instance_name",
             "num_agents",
@@ -496,9 +389,10 @@ namespace mapf::experiments {
             "multithreading",
             "num_threads",
             "solver",
-            "continue_if_failed"
+            "continue_if_failed",
+            "local_repair_strategy"
         };
-        const CsvRow statsRow = {
+        const std::vector<std::string> statsRow = {
             instance.getMapName(),
             instance.getInstanceName(),
             std::to_string(run.numAgents),
@@ -512,17 +406,19 @@ namespace mapf::experiments {
             run.multithreading ? "true" : "false",
             std::to_string(run.numThreads),
             run.solver,
-            run.continueIfFailed ? "true" : "false"
+            run.continueIfFailed ? "true" : "false",
+            run.localRepair ? strategyName(run.localRepairStrategy.value_or(
+                LocalRepairStrategy::RESOLVE_BY_AGENT)) : "-"
         };
 
-        const CsvRow conflictHeaders = {
+        const std::vector<std::string> conflictHeaders = {
             "cell_1",
             "cell_2",
             "timestep",
             "conflict_type",
             "agents"
         };
-        std::vector<CsvRow> conflictRows;
+        std::vector<std::vector<std::string>> conflictRows;
         conflictRows.reserve(finalConflicts.size());
         for (const ConflictRecord& conflict : finalConflicts) {
             conflictRows.push_back({

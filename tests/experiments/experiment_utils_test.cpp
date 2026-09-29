@@ -64,20 +64,20 @@ namespace {
 }
 
 int main() {
-    // Scenario: three agents reach one vertex together. Expected: pairwise events normalize into one record with every sorted experiment ID.
+    // Scenario: three agents pass through one vertex together and continue to distinct goals. Expected: the event normalizes into one record with every sorted experiment ID.
     {
         std::vector<std::vector<int>> freeCells(2, std::vector<int>(3, 1));
         std::vector<mapf::Agent> agents {
-            agent(8, 0, 0, 1, 0),
-            agent(2, 2, 0, 1, 0),
-            agent(5, 1, 1, 1, 0)
+            agent(8, 0, 0, 2, 0),
+            agent(2, 2, 0, 1, 1),
+            agent(5, 1, 1, 0, 0)
         };
         mapf::Instance instance(&freeCells, 2, 3, agents);
         mapf::Cell* center = instance.getGrid().getCellPtr(1, 0);
         std::vector<std::list<mapf::Cell*>> paths {
-            {instance.getGrid().getCellPtr(0, 0), center},
-            {instance.getGrid().getCellPtr(2, 0), center},
-            {instance.getGrid().getCellPtr(1, 1), center}
+            {instance.getGrid().getCellPtr(0, 0), center, instance.getGrid().getCellPtr(2, 0)},
+            {instance.getGrid().getCellPtr(2, 0), center, instance.getGrid().getCellPtr(1, 1)},
+            {instance.getGrid().getCellPtr(1, 1), center, instance.getGrid().getCellPtr(0, 0)}
         };
 
         std::vector<mapf::experiments::ConflictRecord> conflicts =
@@ -140,7 +140,6 @@ int main() {
             .metrics = mapf::Result(true, 0, 0, 0.0, 0.25),
             .initialPaths = {path},
             .solutionPaths = {path},
-            .remainingConflicts = {},
             .numAgents = 1,
             .solver = "LocalPathRepairIterativeSolver",
             .continueIfFailed = true,
@@ -168,7 +167,7 @@ int main() {
         requireTest(!std::filesystem::exists(conflicts), "Successful run wrote conflicts.");
         requireTest(
             readFile(stats).rfind(
-                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,continue_if_failed\n",
+                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,continue_if_failed,local_repair_strategy\n",
                 0
             ) == 0,
             "Stats header is incorrect."
@@ -179,7 +178,7 @@ int main() {
         );
         requireTest(
             readFile(stats).find(
-                ",false,1,LocalPathRepairIterativeSolver,true\n"
+                ",false,1,LocalPathRepairIterativeSolver,true,RESOLVE_BY_AGENT\n"
             ) != std::string::npos,
             "Stats solver metadata is incorrect."
         );
@@ -222,7 +221,6 @@ int main() {
             .metrics = mapf::Result(false, 0, 0, 0.0, 0.1),
             .initialPaths = {initialPath},
             .solutionPaths = {{}},
-            .remainingConflicts = {},
             .numAgents = 1,
             .solver = "LocalPathRepairParallelSolver",
             .continueIfFailed = false,

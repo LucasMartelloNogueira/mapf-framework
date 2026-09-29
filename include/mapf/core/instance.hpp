@@ -19,6 +19,7 @@ namespace mapf {
             Grid grid;
             std::string mapName;
             std::string instanceName;
+            bool isValidInstance() const;
 
         public:
             // manual instance

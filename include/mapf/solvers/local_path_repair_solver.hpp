@@ -12,17 +12,15 @@
 
 namespace mapf {
 
-    // vertexAgents: vai servir para identifcar potenciais conflitos
-    using VertexAgents = std::unordered_map<Cell*, std::unordered_set<int>>;
-
-    // GoalReservations: serve para identificar o momento que celulas que estao
-    //                   permamentemente ocupados por agentes que chegaram nos destinos
-    using GoalReservations = std::unordered_map<Cell*, int>;
+    enum class LocalRepairStrategy {
+        RESOLVE_BY_AGENT,
+        RESOLVE_BY_TIME
+    };
 
     struct PathReservationState {
         SafeIntervalTable safeIntervalTable;
-        VertexAgents vertex_agents;
-        GoalReservations goal_reservations;
+        std::unordered_map<Cell*, std::unordered_set<int>> vertex_agents;
+        std::unordered_map<Cell*, int> goal_reservations;
     };
 
     struct LocalPathRepairResult {

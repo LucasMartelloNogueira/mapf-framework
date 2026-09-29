@@ -1,15 +1,36 @@
 #pragma once
 
 #include <vector>
+#include <unordered_map>
+#include <unordered_set>
+#include <variant>
 
-#include "cell_conflict.hpp"
-#include "edge_conflict.hpp"
+#include "conflict_key.hpp"
 
 namespace mapf {
 
+    struct VertexEvent {
+        std::unordered_set<int> participants;
+    };
+
+    struct EdgeEvent {
+        std::unordered_set<int> forward;
+        std::unordered_set<int> reverse;
+
+        bool active() const {
+            return !forward.empty() && !reverse.empty();
+        }
+    };
+
+    // Participant identities are path indexes; cell pointers are non-owning.
     struct SolutionConflicts {
-        std::vector<CellConflict> cellConflicts;
-        std::vector<EdgeConflict> edgeConflicts;
+        std::unordered_map<CellTime, VertexEvent, CellTimeHash> vertexEvents;
+        std::unordered_map<EdgeTime, EdgeEvent, EdgeTimeHash> edgeEvents;
+        std::vector<std::vector<std::variant<CellConflict, EdgeConflict>>> byAgent;
+
+        bool empty() const {
+            return vertexEvents.empty() && edgeEvents.empty();
+        }
     };
 
 }

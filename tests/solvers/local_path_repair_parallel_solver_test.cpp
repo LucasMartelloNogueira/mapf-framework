@@ -32,16 +32,6 @@ namespace {
         return value;
     }
 
-    bool hasCellConflictAt(const mapf::SolutionConflicts& conflicts, int time) {
-        for (const mapf::CellConflict& conflict : conflicts.cellConflicts) {
-            if (conflict.time == time) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
     struct CrossingSnapshot {
         bool success;
         std::vector<std::string> paths;
@@ -78,10 +68,10 @@ int main() {
         mapf::LocalPathRepairParallelSolver solver(instance, 2);
         mapf::LocalPathRepairResult result = solver.solve();
 
-        requireTest(!result.initialConflicts.cellConflicts.empty(), "The crossing fixture did not create an initial conflict.");
+        requireTest(!result.initialConflicts.vertexEvents.empty(), "The crossing fixture did not create an initial conflict.");
         requireTest(result.metrics.success, "The crossing paths were not repaired.");
-        requireTest(result.remainingConflicts.cellConflicts.empty(), "A vertex conflict remained after crossing repair.");
-        requireTest(result.remainingConflicts.edgeConflicts.empty(), "An edge conflict remained after crossing repair.");
+        requireTest(result.remainingConflicts.vertexEvents.empty(), "A vertex conflict remained after crossing repair.");
+        requireTest(result.remainingConflicts.edgeEvents.empty(), "An edge conflict remained after crossing repair.");
         requireTest(validateSolution(result.paths), "The repaired crossing solution is invalid.");
     }
 
@@ -110,7 +100,7 @@ int main() {
         mapf::LocalPathRepairParallelSolver solver(instance, 2);
         mapf::LocalPathRepairResult result = solver.solve();
 
-        requireTest(!result.initialConflicts.cellConflicts.empty(), "The Scenario 1 fixture did not create an initial conflict.");
+        requireTest(!result.initialConflicts.vertexEvents.empty(), "The Scenario 1 fixture did not create an initial conflict.");
         requireTest(result.metrics.success, "Equal-time suffix reconnection failed.");
         requireTest(result.pathCosts[0] == 2, "Scenario 1 did not preserve the original path cost.");
         requireTest(validateSolution(result.paths), "Scenario 1 produced an invalid solution.");
@@ -147,7 +137,7 @@ int main() {
         mapf::LocalPathRepairResult result = solver.solve();
 
         requireTest(result.metrics.success, "The edge swap was not repaired.");
-        requireTest(result.initialConflicts.edgeConflicts.size() == 1, "The edge-swap fixture did not report its initial conflict.");
+        requireTest(result.initialConflicts.edgeEvents.size() == 1, "The edge-swap fixture did not report its initial conflict.");
         const auto obsoleteEdge = result.reservations.safeIntervalTable.blockedEdgeArrivals.find({oldGoal, oldStart});
         requireTest(
             obsoleteEdge == result.reservations.safeIntervalTable.blockedEdgeArrivals.end() ||
@@ -186,7 +176,7 @@ int main() {
         mapf::LocalPathRepairParallelSolver solver(instance, 3);
         mapf::LocalPathRepairResult result = solver.solve();
 
-        requireTest(!result.initialConflicts.cellConflicts.empty(), "The Scenario 2.3 transition fixture did not create its first conflict.");
+        requireTest(!result.initialConflicts.vertexEvents.empty(), "The Scenario 2.3 transition fixture did not create its first conflict.");
         requireTest(result.metrics.success, "The Scenario 2.3 transition cases were not repaired.");
         requireTest(result.pathCosts[0] > 6, "The Scenario 2.3 fixture did not delay the suffix.");
         requireTest(validateSolution(result.paths), "Scenario 2.3 transition repair returned an invalid solution.");
@@ -218,33 +208,38 @@ int main() {
         requireTest(result.metrics.sumOfCosts == 0 && result.metrics.makespan == 0, "The empty instance has nonzero metrics.");
     }
 
-    // Scenario: two agents have the same fixed start. Expected: solving fails without attempting to mutate the endpoints.
+    // Scenario: two agents have the same fixed start. Expected: instance construction rejects the invalid endpoints before solving.
     {
         std::vector<std::vector<int>> freeCells(2, std::vector<int>(2, 1));
         std::vector<mapf::Agent> agents {
             agent(0, 0, 0, 1, 0),
             agent(1, 0, 0, 0, 1)
         };
-        mapf::Instance instance(&freeCells, 2, 2, agents);
-        mapf::LocalPathRepairParallelSolver solver(instance, 2);
-        mapf::LocalPathRepairResult result = solver.solve();
+        bool threw = false;
+        try {
+            mapf::Instance instance(&freeCells, 2, 2, agents);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
 
-        requireTest(!result.metrics.success, "A shared start was incorrectly repaired.");
-        requireTest(hasCellConflictAt(result.initialConflicts, 0), "The shared-start conflict was not preserved diagnostically.");
+        requireTest(threw, "An instance with a shared start was incorrectly accepted.");
     }
 
-    // Scenario: two agents have the same permanent destination. Expected: solving fails before local repair overwrites the goal reservation.
+    // Scenario: two agents have the same permanent destination. Expected: instance construction rejects duplicate goals before solving.
     {
         std::vector<std::vector<int>> freeCells(2, std::vector<int>(2, 1));
         std::vector<mapf::Agent> agents {
             agent(0, 0, 0, 1, 1),
             agent(1, 1, 0, 1, 1)
         };
-        mapf::Instance instance(&freeCells, 2, 2, agents);
-        mapf::LocalPathRepairParallelSolver solver(instance, 2);
-        mapf::LocalPathRepairResult result = solver.solve();
+        bool threw = false;
+        try {
+            mapf::Instance instance(&freeCells, 2, 2, agents);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
 
-        requireTest(!result.metrics.success, "Duplicate permanent goals were incorrectly accepted.");
+        requireTest(threw, "An instance with duplicate permanent goals was incorrectly accepted.");
     }
 
     // Scenario: an obstacle separates a valid start and goal. Expected: the empty initial A* path produces a diagnostic failure.
@@ -272,7 +267,7 @@ int main() {
 
         requireTest(!result.metrics.success, "An impossible local and full repair was accepted.");
         requireTest(result.paths[0].size() == 2 && result.paths[1].size() == 2, "Failed repair partially changed the committed paths.");
-        requireTest(!result.remainingConflicts.edgeConflicts.empty(), "Failed repair lost its diagnostic edge conflict.");
+        requireTest(!result.remainingConflicts.edgeEvents.empty(), "Failed repair lost its diagnostic edge conflict.");
     }
 
     // Scenario: one agent starts at its own goal. Expected: the solver returns a successful zero-cost one-cell path and permanent reservation.

@@ -3,11 +3,13 @@
 #include "mapf/core/cell.hpp"
 #include "mapf/core/instance.hpp"
 #include "mapf/core/result.hpp"
+#include "mapf/solvers/local_path_repair_solver.hpp"
 
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <list>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -30,13 +32,13 @@ namespace mapf::experiments {
         Result metrics;
         std::vector<std::list<Cell*>> initialPaths;
         std::vector<std::list<Cell*>> solutionPaths;
-        std::vector<ConflictRecord> remainingConflicts;
         int numAgents = 0;
         std::string solver;
         bool continueIfFailed = false;
         bool multithreading = false;
         std::size_t numThreads = 1;
         bool localRepair = false;
+        std::optional<LocalRepairStrategy> localRepairStrategy = std::nullopt;
     };
 
     struct ExperimentOutputPaths {

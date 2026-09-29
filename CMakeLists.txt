@@ -22,6 +22,7 @@ add_library(mapf
     src/mapf/utils.cpp
     src/mapf/core/a-star-heap.cpp
     src/mapf/core/cell.cpp
+    src/mapf/core/conflict_key.cpp
     src/mapf/core/grid.cpp
     src/mapf/core/instance.cpp
     src/mapf/core/result.cpp
@@ -93,6 +94,17 @@ target_link_libraries(benchmark_experiment
     PRIVATE
         mapf_experiment_utils
 )
+
+option(MAPF_BUILD_COLLISION_BENCHMARK "Build the collision detector benchmark" OFF)
+if(MAPF_BUILD_COLLISION_BENCHMARK)
+    add_executable(collision_benchmark tools/collision_benchmark.cpp)
+    target_link_libraries(collision_benchmark PRIVATE mapf)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" MAPF_BENCHMARK_BUILD_TYPE)
+    target_compile_definitions(collision_benchmark PRIVATE
+        MAPF_BENCHMARK_BUILD="${CMAKE_BUILD_TYPE}"
+        MAPF_BENCHMARK_FLAGS="${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${MAPF_BENCHMARK_BUILD_TYPE}}"
+    )
+endif()
 
 if(BUILD_TESTING)
     add_executable(a_star_sipp_test

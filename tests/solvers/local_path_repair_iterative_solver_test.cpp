@@ -71,7 +71,7 @@ int main() {
             "Repaired paths differ between adapters."
         );
         requireTest(
-            !getCollision(iterativeResult.initialPaths).cellConflicts.empty(),
+            !getCollision(iterativeResult.initialPaths).vertexEvents.empty(),
             "The preserved initial paths lost their crossing conflict."
         );
         requireTest(
@@ -120,7 +120,7 @@ int main() {
             "Failed continuation changed committed paths."
         );
         requireTest(
-            !result.remainingConflicts.edgeConflicts.empty(),
+            !result.remainingConflicts.edgeEvents.empty(),
             "The unresolved edge conflict was not recomputed at return."
         );
     }
@@ -147,15 +147,15 @@ int main() {
         requireTest(!stopped.metrics.success, "The stopped mixed fixture succeeded.");
         requireTest(!continued.metrics.success, "The continued mixed fixture succeeded.");
         requireTest(
-            !stopped.remainingConflicts.cellConflicts.empty(),
+            !stopped.remainingConflicts.vertexEvents.empty(),
             "Immediate failure unexpectedly repaired the later crossing."
         );
         requireTest(
-            continued.remainingConflicts.cellConflicts.empty(),
+            continued.remainingConflicts.vertexEvents.empty(),
             "Continuation did not repair the later crossing."
         );
         requireTest(
-            !continued.remainingConflicts.edgeConflicts.empty(),
+            !continued.remainingConflicts.edgeEvents.empty(),
             "Continuation lost the genuinely unresolved edge swap."
         );
         requireTest(

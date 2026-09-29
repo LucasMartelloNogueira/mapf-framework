@@ -11,9 +11,14 @@
 void printPath(const std::list<mapf::Cell*>& path);
 
 
+// All cells must belong to one live grid. Rejects null cells, duplicate nonempty
+// starts/goals and unrepresentable path indexes/times with std::invalid_argument.
+// Empty path slots stay aligned; global events include virtual destination owners.
 mapf::SolutionConflicts getCollision(const std::vector<std::list<mapf::Cell*>>& paths);
 
 
+// Collision predicate only: empty slots do not imply failure. Invalid detector
+// input returns false; callers must check required path completeness separately.
 bool validateSolution(const std::vector<std::list<mapf::Cell*>>& paths);
 
 using CsvRow = std::vector<std::string>;

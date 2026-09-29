@@ -23,10 +23,6 @@ int main() {
         .metrics = result,
         .initialPaths = solver.getInitialPaths(),
         .solutionPaths = solver.getPaths(),
-        .remainingConflicts = mapf::experiments::normalizeConflicts(
-            instance,
-            solver.getPaths()
-        ),
         .numAgents = instance.getNumAgents(),
         .solver = "PriorityPlanningSolver",
         .continueIfFailed = false,

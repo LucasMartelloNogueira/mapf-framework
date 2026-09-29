@@ -25,13 +25,17 @@ namespace {
         std::optional<std::size_t> threads;
         bool continueIfFailed = false;
         bool continueIfFailedProvided = false;
+        mapf::LocalRepairStrategy localRepairStrategy = mapf::LocalRepairStrategy::RESOLVE_BY_AGENT;
+        bool localRepairStrategyProvided = false;
     };
 
     void printUsage(std::ostream& output, const char* binary) {
         output
             << "Usage: " << binary
             << " -map <map> -scen <scenario> -solver <solver> -agents <n>"
-            << " [-threads <t>] [-continue_if_failed <true|false>]\n"
+            << " [-threads <t>] [-continue_if_failed <true|false>]"
+            << " [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>]\n"
+            << "Local repair strategy applies to local solvers; default: RESOLVE_BY_AGENT.\n"
             << "Solvers: PriorityPlanningSolver, LocalPathRepairParallelSolver, "
             << "LocalPathRepairIterativeSolver\n";
     }
@@ -57,6 +61,17 @@ namespace {
         throw std::invalid_argument(flag + " accepts only 'true' or 'false'.");
     }
 
+    mapf::LocalRepairStrategy parseLocalRepairStrategy(const std::string& value) {
+        if (value == "RESOLVE_BY_AGENT") {
+            return mapf::LocalRepairStrategy::RESOLVE_BY_AGENT;
+        }
+        if (value == "RESOLVE_BY_TIME") {
+            return mapf::LocalRepairStrategy::RESOLVE_BY_TIME;
+        }
+        throw std::invalid_argument(
+            "-localRepairStrategy accepts only RESOLVE_BY_AGENT or RESOLVE_BY_TIME.");
+    }
+
     CliOptions parseOptions(int argc, char* argv[]) {
         std::optional<std::string> map;
         std::optional<std::string> scenario;
@@ -64,6 +79,7 @@ namespace {
         std::optional<std::string> agents;
         std::optional<std::string> threads;
         std::optional<std::string> continueIfFailed;
+        std::optional<std::string> localRepairStrategy;
 
         for (int index = 1; index < argc; index += 2) {
             const std::string flag = argv[index];
@@ -86,6 +102,8 @@ namespace {
                 target = &threads;
             } else if (flag == "-continue_if_failed") {
                 target = &continueIfFailed;
+            } else if (flag == "-localRepairStrategy") {
+                target = &localRepairStrategy;
             } else {
                 throw std::invalid_argument("Unknown flag or positional argument '" + flag + "'.");
             }
@@ -127,7 +145,16 @@ namespace {
             options.continueIfFailedProvided = true;
         }
 
+        if (localRepairStrategy) {
+            options.localRepairStrategy = parseLocalRepairStrategy(*localRepairStrategy);
+            options.localRepairStrategyProvided = true;
+        }
+
         if (options.solver == "PriorityPlanningSolver") {
+            if (options.localRepairStrategyProvided) {
+                throw std::invalid_argument(
+                    "-localRepairStrategy is not accepted by PriorityPlanningSolver.");
+            }
             if (options.threads) {
                 throw std::invalid_argument(
                     "-threads is not accepted by PriorityPlanningSolver."
@@ -191,7 +218,8 @@ int runCli(int argc, char* argv[]) {
             mapf::LocalPathRepairParallelSolver solver(
                 instance,
                 options.threads.value(),
-                options.continueIfFailed
+                options.continueIfFailed,
+                options.localRepairStrategy
             );
             mapf::LocalPathRepairResult result = solver.solve();
             experimentTimeSeconds =
@@ -204,10 +232,12 @@ int runCli(int argc, char* argv[]) {
             run.multithreading = true;
             run.numThreads = options.threads.value();
             run.localRepair = true;
+            run.localRepairStrategy = options.localRepairStrategy;
         } else if (options.solver == "LocalPathRepairIterativeSolver") {
             mapf::LocalPathRepairIterativeSolver solver(
                 instance,
-                options.continueIfFailed
+                options.continueIfFailed,
+                options.localRepairStrategy
             );
             mapf::LocalPathRepairResult result = solver.solve();
             experimentTimeSeconds =
@@ -220,15 +250,12 @@ int runCli(int argc, char* argv[]) {
             run.multithreading = false;
             run.numThreads = 1;
             run.localRepair = true;
+            run.localRepairStrategy = options.localRepairStrategy;
         } else {
             throw std::invalid_argument("Unknown solver '" + options.solver + "'.");
         }
 
         try {
-            run.remainingConflicts = mapf::experiments::normalizeConflicts(
-                instance,
-                run.solutionPaths
-            );
             if (!mapf::experiments::writeExperimentArtifacts(
                 instance,
                 run,

@@ -12,10 +12,14 @@ namespace mapf {
 
     LocalPathRepairIterativeSolver::LocalPathRepairIterativeSolver(
         const Instance& instance,
-        bool continueIfFailed
+        bool continueIfFailed,
+        LocalRepairStrategy localRepairStrategy
     ) :
         instance(instance),
-        continueIfFailed(continueIfFailed) {}
+        continueIfFailed(continueIfFailed),
+        localRepairStrategy(localRepairStrategy) {
+        local_path_repair_detail::validateLocalRepairStrategy(localRepairStrategy);
+    }
 
     LocalPathRepairResult LocalPathRepairIterativeSolver::solve() {
         const auto startedAt = std::chrono::steady_clock::now();
@@ -41,7 +45,8 @@ namespace mapf {
             instance,
             std::move(initialPaths),
             continueIfFailed,
-            startedAt
+            startedAt,
+            localRepairStrategy
         );
     }
 

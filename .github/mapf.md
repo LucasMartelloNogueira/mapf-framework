@@ -379,3 +379,14 @@ The objective is to find a set of simultaneous paths that:
 - optimize a specified objective function (typically Makespan or Sum-of-Costs).
 
 Although many MAPF variants exist, the concepts described in this document form the common foundation shared by most algorithms in the literature.
+
+### important information
+
+for this specific work, the following things are considered:
+
+- no two agents can share the same initial position and a target position. If this happens, the instance should be considered invalid
+- if a instance is considered invalid, the program must return an error, before looking for a solution
+- the following conflict are considered: Vertex Conflict, Edge Conflict and swapping. Meaning that the solution must not contain theese conflicts
+- the following conflicts are *** NOT *** considered: Following Conflict and Cycle Conflict. Meaning that should not be checked when validating a solution
+- both Makespan and sum-of-costs objective functions will be used in this work
+- after a agent reaches it's goal, it will stay at target

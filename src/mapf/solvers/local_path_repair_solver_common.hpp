@@ -9,11 +9,14 @@
 
 namespace mapf::local_path_repair_detail {
 
+    void validateLocalRepairStrategy(LocalRepairStrategy strategy);
+
     LocalPathRepairResult repairInitialPaths(
         const Instance& instance,
         std::vector<std::list<Cell*>> initialPaths,
         bool continueIfFailed,
-        std::chrono::steady_clock::time_point startedAt
+        std::chrono::steady_clock::time_point startedAt,
+        LocalRepairStrategy localRepairStrategy
     );
 
 }

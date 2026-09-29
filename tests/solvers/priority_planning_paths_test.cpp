@@ -87,18 +87,18 @@ int main() {
         requireTest(solver.getInitialPaths()[0].empty(), "Repeated solve retained an old initial path.");
     }
 
-    // Scenario: the second priority item shares the first agent's permanent goal. Expected: the first committed path and partial metrics survive the failure.
+    // Scenario: two agents swap endpoints in a one-cell-wide corridor with no detour. Expected: the first committed path and partial metrics survive the second agent's failure.
     {
-        std::vector<std::vector<int>> freeCells(2, std::vector<int>(3, 1));
+        std::vector<std::vector<int>> freeCells(1, std::vector<int>(3, 1));
         std::vector<mapf::Agent> agents {
             agent(10, 0, 0, 2, 0),
-            agent(20, 0, 1, 2, 0)
+            agent(20, 2, 0, 0, 0)
         };
-        mapf::Instance instance(&freeCells, 2, 3, agents);
+        mapf::Instance instance(&freeCells, 1, 3, agents);
         mapf::PriorityPlanningSolver solver(instance);
         mapf::Result result = solver.solve({10, 20});
 
-        requireTest(!result.success, "Duplicate permanent goals unexpectedly succeeded.");
+        requireTest(!result.success, "An impossible corridor swap unexpectedly succeeded.");
         requireTest(!solver.getPaths()[0].empty(), "The first committed path was lost.");
         requireTest(solver.getPaths()[1].empty(), "The failed second path was committed.");
         requireTest(result.sumOfCosts == 2, "Partial sum of costs is wrong.");
