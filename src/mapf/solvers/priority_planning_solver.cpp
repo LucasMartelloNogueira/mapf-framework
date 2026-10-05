@@ -83,12 +83,24 @@ namespace mapf {
                 makespan = std::max(makespan, cost);
             }
 
+            const SolutionConflicts initialConflicts = getCollision(initialPaths);
+            const SolutionConflicts finalConflicts = getCollision(paths);
+            const std::size_t numInitialConflicts = initialConflicts.vertexEvents.size() +
+                initialConflicts.edgeEvents.size();
+            const std::size_t numUnresolvedConflicts = finalConflicts.vertexEvents.size() +
+                finalConflicts.edgeEvents.size();
+            const std::size_t numResolvedConflicts = numInitialConflicts -
+                std::min(numInitialConflicts, numUnresolvedConflicts);
+
             return Result(
-                requestedSuccess && allPathsExist && validateSolution(paths),
+                requestedSuccess && allPathsExist && finalConflicts.empty(),
                 sumOfCosts,
                 makespan,
                 calculateInjustice(initialPaths, paths),
-                elapsedSeconds(startedAt)
+                elapsedSeconds(startedAt),
+                numInitialConflicts,
+                numResolvedConflicts,
+                numUnresolvedConflicts
             );
         }
     }

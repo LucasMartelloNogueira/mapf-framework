@@ -81,7 +81,7 @@ not exposed under the final prefix.
 ## Statistics Schema
 
 ```text
-map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,continue_if_failed,local_repair_strategy
+map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,continue_if_failed,local_repair_strategy,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts
 ```
 
 - `num_agents` is the exact non-negative value supplied through `-agents`.
@@ -103,6 +103,15 @@ map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustic
   default; priority planning and full-path repair record `false`.
 - `local_repair_strategy` is the selected strategy for local repair, and `-`
   for priority planning and full-path repair.
+- `num_inital_conflicts` counts normalized vertex and edge conflicts in the
+  initial paths.
+- `num_resolved_conflicts` is the initial conflict count minus the final count,
+  with a minimum of zero.
+- `num_unresolved_conflicts` counts normalized vertex and edge conflicts in the
+  final paths, using the same events as the conflicts CSV.
+
+All solvers populate these three conflict counts in `Result`; the CSV writers
+serialize those metrics, including for failed or partially solved runs.
 
 ## Solution Schema
 

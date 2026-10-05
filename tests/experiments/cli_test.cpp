@@ -98,7 +98,7 @@ namespace {
         );
         requireTest(
             stats.rfind(
-                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,continue_if_failed,local_repair_strategy\n",
+                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,continue_if_failed,local_repair_strategy,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts\n",
                 0
             ) == 0,
             "Stats header is incorrect."
@@ -112,7 +112,7 @@ namespace {
             stats.find(
                 "," + solver + "," +
                 (continueIfFailed ? "true" : "false") + "," +
-                (localRepair ? "RESOLVE_BY_AGENT" : "-") + "\n"
+                (localRepair ? "RESOLVE_BY_AGENT" : "-") + ",0,0,0\n"
             ) != std::string::npos,
             solver + " metadata was not serialized from CLI options."
         );
@@ -206,8 +206,8 @@ int main() {
             );
             requireTest(
                 stats.find("\ncorridor.map,corridor.scen,2,false,") !=
-                    std::string::npos,
-                "Failed CLI run did not serialize the -agents value."
+                    std::string::npos && stats.ends_with(",1,0,1\n"),
+                "Failed CLI run did not serialize the agent count and conflict metrics."
             );
             requireTest(
                 conflicts.find("0-0,1-0,1,edge,0|1") != std::string::npos,

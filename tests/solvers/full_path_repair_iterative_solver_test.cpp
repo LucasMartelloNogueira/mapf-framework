@@ -158,6 +158,8 @@ int main() {
             "Full-group removal or real-ID priority is incorrect.");
         requireTest(result.metrics.sumOfCosts == 5 && result.metrics.makespan == 3 &&
             result.metrics.injustice == 0.5, "Crossing metrics are incorrect.");
+        requireTest(result.metrics.numInitialConflicts == 1 && result.metrics.numResolvedConflicts == 1 &&
+            result.metrics.numUnresolvedConflicts == 0, "Crossing conflict metrics are incorrect.");
     }
 
     // All three participants of a vertex must be repaired.

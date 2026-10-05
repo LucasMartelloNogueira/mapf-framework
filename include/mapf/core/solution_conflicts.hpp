@@ -23,6 +23,7 @@ namespace mapf {
     };
 
     // Participant identities are path indexes; cell pointers are non-owning.
+    // TODO: consome bastante
     struct SolutionConflicts {
         std::unordered_map<CellTime, VertexEvent, CellTimeHash> vertexEvents;
         std::unordered_map<EdgeTime, EdgeEvent, EdgeTimeHash> edgeEvents;

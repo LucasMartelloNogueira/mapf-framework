@@ -67,6 +67,8 @@ int main() {
         mapf::Result result = solver.solve({20, 10});
 
         requireTest(result.success, "Reverse priority order failed.");
+        requireTest(result.numInitialConflicts == 0 && result.numResolvedConflicts == 0 &&
+            result.numUnresolvedConflicts == 0, "Independent paths reported conflicts.");
         requireTest(solver.getInitialPaths().size() == 2, "Initial paths are not aligned.");
         requireTest(solver.getPaths().size() == 2, "Solution paths are not aligned.");
         requireTest(
@@ -83,6 +85,8 @@ int main() {
 
         mapf::Result invalid = solver.solve({10, 10});
         requireTest(!invalid.success, "Duplicate priority IDs were accepted.");
+        requireTest(invalid.numInitialConflicts == 0 && invalid.numResolvedConflicts == 0 &&
+            invalid.numUnresolvedConflicts == 0, "Invalid priority order reported conflicts.");
         requireTest(solver.getPaths()[0].empty(), "Repeated solve retained an old path.");
         requireTest(solver.getInitialPaths()[0].empty(), "Repeated solve retained an old initial path.");
     }
@@ -103,6 +107,8 @@ int main() {
         requireTest(solver.getPaths()[1].empty(), "The failed second path was committed.");
         requireTest(result.sumOfCosts == 2, "Partial sum of costs is wrong.");
         requireTest(result.makespan == 2, "Partial makespan is wrong.");
+        requireTest(result.numInitialConflicts == 1 && result.numResolvedConflicts == 1 &&
+            result.numUnresolvedConflicts == 0, "Partial conflict metrics differ from the available paths.");
     }
 
     return 0;

@@ -60,6 +60,10 @@ int main() {
 
         requireTest(iterativeResult.metrics.success, "Iterative crossing repair failed.");
         requireTest(parallelResult.metrics.success, "Parallel crossing repair failed.");
+        for (const mapf::Result& metrics : {iterativeResult.metrics, parallelResult.metrics}) {
+            requireTest(metrics.numInitialConflicts == 1 && metrics.numResolvedConflicts == 1 &&
+                metrics.numUnresolvedConflicts == 0, "Crossing conflict metrics are incorrect.");
+        }
         requireSamePaths(
             iterativeResult.initialPaths,
             parallelResult.initialPaths,
@@ -92,6 +96,8 @@ int main() {
         mapf::LocalPathRepairResult result = solver.solve();
 
         requireTest(!result.metrics.success, "An unreachable initial path succeeded.");
+        requireTest(result.metrics.numInitialConflicts == 0 && result.metrics.numResolvedConflicts == 0 &&
+            result.metrics.numUnresolvedConflicts == 0, "Missing initial path reported conflicts.");
         requireTest(result.initialPaths.size() == 2, "Initial paths are not aligned.");
         requireTest(result.initialPaths[0].empty(), "The unreachable path is not empty.");
         requireTest(!result.initialPaths[1].empty(), "The later reachable path was not attempted.");
@@ -114,6 +120,8 @@ int main() {
         mapf::LocalPathRepairResult result = solver.solve();
 
         requireTest(!result.metrics.success, "Impossible continuation repair succeeded.");
+        requireTest(result.metrics.numInitialConflicts == 1 && result.metrics.numResolvedConflicts == 0 &&
+            result.metrics.numUnresolvedConflicts == 1, "Failed repair conflict metrics are incorrect.");
         requireSamePaths(
             result.initialPaths,
             result.paths,
@@ -146,6 +154,10 @@ int main() {
 
         requireTest(!stopped.metrics.success, "The stopped mixed fixture succeeded.");
         requireTest(!continued.metrics.success, "The continued mixed fixture succeeded.");
+        requireTest(stopped.metrics.numInitialConflicts == 2 && stopped.metrics.numResolvedConflicts == 0 &&
+            stopped.metrics.numUnresolvedConflicts == 2, "Stopped repair conflict metrics are incorrect.");
+        requireTest(continued.metrics.numInitialConflicts == 2 && continued.metrics.numResolvedConflicts == 1 &&
+            continued.metrics.numUnresolvedConflicts == 1, "Partial repair conflict metrics are incorrect.");
         requireTest(
             !stopped.remainingConflicts.vertexEvents.empty(),
             "Immediate failure unexpectedly repaired the later crossing."
@@ -173,6 +185,8 @@ int main() {
         mapf::LocalPathRepairResult result = solver.solve();
 
         requireTest(result.metrics.success, "The empty iterative instance failed.");
+        requireTest(result.metrics.numInitialConflicts == 0 && result.metrics.numResolvedConflicts == 0 &&
+            result.metrics.numUnresolvedConflicts == 0, "Empty instance reported conflicts.");
         requireTest(
             result.initialPaths.empty() && result.paths.empty() && result.pathCosts.empty(),
             "The empty iterative result contains path entries."

@@ -927,13 +927,22 @@ namespace mapf {
         const bool conflictFree = result.remainingConflicts.empty();
         const bool success =
             requestedSuccess && allPathsExist && conflictFree;
+        const std::size_t numInitialConflicts = result.initialConflicts.vertexEvents.size() +
+            result.initialConflicts.edgeEvents.size();
+        const std::size_t numUnresolvedConflicts = result.remainingConflicts.vertexEvents.size() +
+            result.remainingConflicts.edgeEvents.size();
+        const std::size_t numResolvedConflicts = numInitialConflicts -
+            std::min(numInitialConflicts, numUnresolvedConflicts);
 
         result.metrics = Result(
             success,
             sumOfCosts,
             makespan,
             calculateInjustice(result.initialPaths, result.paths),
-            elapsedSeconds(startedAt)
+            elapsedSeconds(startedAt),
+            numInitialConflicts,
+            numResolvedConflicts,
+            numUnresolvedConflicts
         );
     }
 

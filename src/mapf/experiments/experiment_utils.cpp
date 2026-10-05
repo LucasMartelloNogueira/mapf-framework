@@ -391,7 +391,10 @@ namespace mapf::experiments {
             "num_threads",
             "solver",
             "continue_if_failed",
-            "local_repair_strategy"
+            "local_repair_strategy",
+            "num_inital_conflicts",
+            "num_resolved_conflicts",
+            "num_unresolved_conflicts"
         };
         const std::vector<std::string> statsRow = {
             instance.getMapName(),
@@ -409,7 +412,10 @@ namespace mapf::experiments {
             run.solver,
             run.continueIfFailed ? "true" : "false",
             run.localRepair ? strategyName(run.localRepairStrategy.value_or(
-                LocalRepairStrategy::RESOLVE_BY_AGENT)) : "-"
+                LocalRepairStrategy::RESOLVE_BY_AGENT)) : "-",
+            std::to_string(run.metrics.numInitialConflicts),
+            std::to_string(run.metrics.numResolvedConflicts),
+            std::to_string(run.metrics.numUnresolvedConflicts)
         };
 
         const std::vector<std::string> conflictHeaders = {
@@ -490,7 +496,10 @@ namespace mapf::experiments {
             "makespan",
             "injustice",
             "durationSeconds",
-            "time"
+            "time",
+            "num_inital_conflicts",
+            "num_resolved_conflicts",
+            "num_unresolved_conflicts"
         };
         const CsvRow row = {
             instance.getMapName(),
@@ -501,7 +510,10 @@ namespace mapf::experiments {
             std::to_string(result.makespan),
             formatDouble(result.injustice),
             formatDouble(result.durationSeconds),
-            formatDouble(experimentTimeSeconds)
+            formatDouble(experimentTimeSeconds),
+            std::to_string(result.numInitialConflicts),
+            std::to_string(result.numResolvedConflicts),
+            std::to_string(result.numUnresolvedConflicts)
         };
 
         return writeRowsToCsvFile(makeResultPath(), headers, {row});

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+
 namespace mapf {
 
     class Result {
@@ -9,6 +11,9 @@ namespace mapf {
             int makespan = 0;
             double injustice = 0.0;
             double durationSeconds = 0.0;
+            std::size_t numInitialConflicts = 0;
+            std::size_t numResolvedConflicts = 0;
+            std::size_t numUnresolvedConflicts = 0;
 
             Result() = default;
             Result(
@@ -16,7 +21,10 @@ namespace mapf {
                 int sumOfCosts,
                 int makespan,
                 double injustice,
-                double durationSeconds
+                double durationSeconds,
+                std::size_t numInitialConflicts = 0,
+                std::size_t numResolvedConflicts = 0,
+                std::size_t numUnresolvedConflicts = 0
             );
     };
 
