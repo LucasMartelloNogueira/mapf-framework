@@ -155,7 +155,8 @@ namespace mapf::experiments {
             return
                 solver == "PriorityPlanningSolver" ||
                 solver == "LocalPathRepairParallelSolver" ||
-                solver == "LocalPathRepairIterativeSolver";
+                solver == "LocalPathRepairIterativeSolver" ||
+                solver == "FullPathRepairIterativeSolver";
         }
 
         std::string strategyName(LocalRepairStrategy strategy) {
@@ -170,7 +171,7 @@ namespace mapf::experiments {
         }
 
         bool validSolverMetadata(const ExperimentRunResult& run) {
-            if (run.solver == "PriorityPlanningSolver") {
+            if (run.solver == "PriorityPlanningSolver" || run.solver == "FullPathRepairIterativeSolver") {
                 return
                     !run.continueIfFailed &&
                     !run.multithreading &&
@@ -451,7 +452,8 @@ namespace mapf::experiments {
             return false;
         }
 
-        const bool needsConflicts = run.localRepair && !run.metrics.success;
+        const bool needsConflicts = !run.metrics.success &&
+            (run.localRepair || run.solver == "FullPathRepairIterativeSolver");
         const bool wroteAll =
             writeRowsToCsvFile(temporaryStats, statsHeaders, {statsRow}) &&
             writeRowsToCsvFile(temporarySolution, solutionHeaders, solutionRows) &&

@@ -164,6 +164,29 @@ int main() {
         requireTest(untouchedStorage == state.safeIntervalTable.safeIntervalsByCell.at(untouched).data(),
             "An unrelated cell's interval storage was replaced.");
         requireOccupancyMatchesPaths(grid, state, paths);
+
+        // A full-repair group excludes both old paths, then inserts replacements
+        // with shifted visits/goals while preserving the outsider's opposite move.
+        for (std::size_t i : {0U, 1U}) {
+            repairSafeIntervalTable(state, paths[i], agents[i].id);
+        }
+        requireSameState(state, buildReservationState(grid, agents, excluded));
+        requireOccupancyMatchesPaths(grid, state, excluded);
+        const Paths replacements {{left, left, a, b, right}, {top, top, top, a, b, bottom}};
+        for (std::size_t i : {0U, 1U}) {
+            updateReservationState(state, replacements[i], agents[i].id);
+            excluded[i] = replacements[i];
+            requireSameState(state, buildReservationState(grid, agents, excluded));
+            requireOccupancyMatchesPaths(grid, state, excluded);
+        }
+        requireTest(state.vertex_agents.at(a).at(2) == std::unordered_set<int>({10, -7}),
+            "Replacement removed the outsider's shared visit.");
+        requireTest(!state.vertex_agents.at(a).contains(1), "Obsolete group occupancy survived.");
+        requireTest(state.safeIntervalTable.blockedEdgeArrivals.at({a, b}).contains(2),
+            "Group insertion lost the outsider's opposite movement.");
+        requireTest(state.goal_reservations.at(right).arrivalTime == 4 &&
+            state.goal_reservations.at(bottom).arrivalTime == 5, "Group arrival times were not shifted.");
+        requireSameState(committed, buildReservationState(grid, agents, paths));
     }
 
     // Removing a permanent owner reveals a later visitor; removing the visitor

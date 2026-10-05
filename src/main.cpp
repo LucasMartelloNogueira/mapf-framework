@@ -1,6 +1,7 @@
 #include "experiment_utils.hpp"
 
 #include "mapf/core/instance.hpp"
+#include "mapf/solvers/full_path_repair_iterative_solver.hpp"
 #include "mapf/solvers/local_path_repair_iterative_solver.hpp"
 #include "mapf/solvers/local_path_repair_parallel_solver.hpp"
 #include "mapf/solvers/priority_planning_solver.hpp"
@@ -37,7 +38,8 @@ namespace {
             << " [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>]\n"
             << "Local repair strategy applies to local solvers; default: RESOLVE_BY_AGENT.\n"
             << "Solvers: PriorityPlanningSolver, LocalPathRepairParallelSolver, "
-            << "LocalPathRepairIterativeSolver\n";
+            << "LocalPathRepairIterativeSolver, FullPathRepairIterativeSolver\n"
+            << "FullPathRepairIterativeSolver uses fixed ID priority and accepts no optional flags.\n";
     }
 
     int parseInteger(const std::string& value, const std::string& flag) {
@@ -177,6 +179,12 @@ namespace {
                     "-threads is not accepted by LocalPathRepairIterativeSolver."
                 );
             }
+        } else if (options.solver == "FullPathRepairIterativeSolver") {
+            if (options.threads || options.continueIfFailedProvided || options.localRepairStrategyProvided) {
+                throw std::invalid_argument(
+                    "FullPathRepairIterativeSolver does not accept -threads, "
+                    "-continue_if_failed, or -localRepairStrategy.");
+            }
         } else {
             throw std::invalid_argument("Unknown solver '" + options.solver + "'.");
         }
@@ -251,6 +259,20 @@ int runCli(int argc, char* argv[]) {
             run.numThreads = 1;
             run.localRepair = true;
             run.localRepairStrategy = options.localRepairStrategy;
+        } else if (options.solver == "FullPathRepairIterativeSolver") {
+            mapf::FullPathRepairIterativeSolver solver(instance);
+            mapf::LocalPathRepairResult result = solver.solve();
+            experimentTimeSeconds =
+                mapf::experiments::elapsedSeconds(experimentStartedAt);
+            run.metrics = result.metrics;
+            run.initialPaths = std::move(result.initialPaths);
+            run.solutionPaths = std::move(result.paths);
+            run.solver = "FullPathRepairIterativeSolver";
+            run.continueIfFailed = false;
+            run.multithreading = false;
+            run.numThreads = 1;
+            run.localRepair = false;
+            run.localRepairStrategy = std::nullopt;
         } else {
             throw std::invalid_argument("Unknown solver '" + options.solver + "'.");
         }

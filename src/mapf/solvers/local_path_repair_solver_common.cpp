@@ -901,40 +901,40 @@ namespace mapf {
                 squaredDistanceSum / static_cast<double>(differences.size())
             );
         }
+    }
 
-        void updateResultMetrics(
-            LocalPathRepairResult& result,
-            const std::vector<Agent>& agents,
-            bool requestedSuccess,
-            std::chrono::steady_clock::time_point startedAt
-        ) {
-            result.pathCosts.assign(result.paths.size(), 0);
-            int sumOfCosts = 0;
-            int makespan = 0;
-            bool allPathsExist = result.paths.size() == agents.size();
+    void local_path_repair_detail::updateResultMetrics(
+        LocalPathRepairResult& result,
+        const std::vector<Agent>& agents,
+        bool requestedSuccess,
+        std::chrono::steady_clock::time_point startedAt
+    ) {
+        result.pathCosts.assign(result.paths.size(), 0);
+        int sumOfCosts = 0;
+        int makespan = 0;
+        bool allPathsExist = result.paths.size() == agents.size();
 
-            for (std::size_t i = 0; i < result.paths.size(); i++) {
-                if (result.paths[i].empty()) {
-                    allPathsExist = false;
-                }
-
-                result.pathCosts[i] = pathCost(result.paths[i]);
-                sumOfCosts += result.pathCosts[i];
-                makespan = std::max(makespan, result.pathCosts[i]);
+        for (std::size_t i = 0; i < result.paths.size(); i++) {
+            if (result.paths[i].empty()) {
+                allPathsExist = false;
             }
 
-            const bool conflictFree = result.remainingConflicts.empty();
-            const bool success =
-                requestedSuccess && allPathsExist && conflictFree;
-
-            result.metrics = Result(
-                success,
-                sumOfCosts,
-                makespan,
-                calculateInjustice(result.initialPaths, result.paths),
-                elapsedSeconds(startedAt)
-            );
+            result.pathCosts[i] = pathCost(result.paths[i]);
+            sumOfCosts += result.pathCosts[i];
+            makespan = std::max(makespan, result.pathCosts[i]);
         }
+
+        const bool conflictFree = result.remainingConflicts.empty();
+        const bool success =
+            requestedSuccess && allPathsExist && conflictFree;
+
+        result.metrics = Result(
+            success,
+            sumOfCosts,
+            makespan,
+            calculateInjustice(result.initialPaths, result.paths),
+            elapsedSeconds(startedAt)
+        );
     }
 
     PathReservationState local_path_repair_detail::buildReservationState(

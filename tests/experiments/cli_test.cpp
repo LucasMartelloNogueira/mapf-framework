@@ -82,7 +82,9 @@ namespace {
             arguments.push_back("-threads");
             arguments.push_back("2");
         }
-        if (solver != "PriorityPlanningSolver") {
+        const bool localRepair = solver == "LocalPathRepairIterativeSolver" ||
+            solver == "LocalPathRepairParallelSolver";
+        if (localRepair) {
             arguments.push_back("-continue_if_failed");
             arguments.push_back(continueIfFailed ? "true" : "false");
         }
@@ -110,10 +112,12 @@ namespace {
             stats.find(
                 "," + solver + "," +
                 (continueIfFailed ? "true" : "false") + "," +
-                (solver == "PriorityPlanningSolver" ? "-" : "RESOLVE_BY_AGENT") + "\n"
+                (localRepair ? "RESOLVE_BY_AGENT" : "-") + "\n"
             ) != std::string::npos,
             solver + " metadata was not serialized from CLI options."
         );
+        requireTest(!std::filesystem::exists(directory / (prefix + "_conflicts.csv")),
+            "Successful CLI run wrote a conflicts artifact.");
         std::filesystem::remove_all(directory);
     }
 }
@@ -158,6 +162,7 @@ int main() {
         true,
         false
     );
+    requireSuccessfulRun(mapPath, scenarioPath, "FullPathRepairIterativeSolver", false, false);
 
     // Scenario: two agents swap an edge in a one-cell corridor. Expected: CLI returns algorithmic-failure code 1 and writes final paths plus the unresolved normalized conflict.
     {
@@ -175,46 +180,95 @@ int main() {
                 << "3 corridor.map 2 1 1 0 0 0 1\n";
         }
 
-        const std::set<std::filesystem::path> before = resultDirectories();
-        requireTest(
-            invoke({
-                "mapf_app", "-map", corridorMap.string(),
-                "-scen", corridorScenario.string(),
-                "-solver", "LocalPathRepairIterativeSolver",
-                "-agents", "2", "-continue_if_failed", "true"
-            }) == 1,
-            "Algorithmic local-repair failure did not return code 1."
-        );
-        const std::filesystem::path runDirectory = findNewDirectory(before);
-        const std::string prefix = runDirectory.filename().string();
-        const std::string conflicts = readFile(
-            runDirectory / (prefix + "_conflicts.csv")
-        );
-        const std::string solution = readFile(
-            runDirectory / (prefix + "_solution.csv")
-        );
-        const std::string stats = readFile(
-            runDirectory / (prefix + "_stats.csv")
-        );
-        requireTest(
-            stats.find("\ncorridor.map,corridor.scen,2,false,") !=
-                std::string::npos,
-            "Failed CLI run did not serialize the -agents value."
-        );
-        requireTest(
-            conflicts.find("0-0,1-0,1,edge,0|1") != std::string::npos,
-            "Failed CLI run did not serialize its final edge conflict."
-        );
-        requireTest(
-            solution.find(",true,false\n") != std::string::npos,
-            "A conflicted final path was not marked unsuccessful."
-        );
-        std::filesystem::remove_all(runDirectory);
+        for (const std::string solver : {"LocalPathRepairIterativeSolver", "FullPathRepairIterativeSolver"}) {
+            const std::set<std::filesystem::path> before = resultDirectories();
+            std::vector<std::string> arguments {
+                "mapf_app", "-map", corridorMap.string(), "-scen", corridorScenario.string(),
+                "-solver", solver, "-agents", "2"
+            };
+            if (solver == "LocalPathRepairIterativeSolver") {
+                arguments.insert(arguments.end(), {"-continue_if_failed", "true"});
+            }
+            requireTest(
+                invoke(std::move(arguments)) == 1,
+                "Algorithmic local-repair failure did not return code 1."
+            );
+            const std::filesystem::path runDirectory = findNewDirectory(before);
+            const std::string prefix = runDirectory.filename().string();
+            const std::string conflicts = readFile(
+                runDirectory / (prefix + "_conflicts.csv")
+            );
+            const std::string solution = readFile(
+                runDirectory / (prefix + "_solution.csv")
+            );
+            const std::string stats = readFile(
+                runDirectory / (prefix + "_stats.csv")
+            );
+            requireTest(
+                stats.find("\ncorridor.map,corridor.scen,2,false,") !=
+                    std::string::npos,
+                "Failed CLI run did not serialize the -agents value."
+            );
+            requireTest(
+                conflicts.find("0-0,1-0,1,edge,0|1") != std::string::npos,
+                "Failed CLI run did not serialize its final edge conflict."
+            );
+            requireTest(
+                solution.find(",true,false\n") != std::string::npos,
+                "A conflicted final path was not marked unsuccessful."
+            );
+            requireTest(solution.find("0,3,0-0,1-0,0-0|1-0,0-0|1-0,1,1,true,false") != std::string::npos &&
+                solution.find("1,3,1-0,0-0,1-0|0-0,1-0|0-0,1,1,true,false") != std::string::npos,
+                "Failed group serialized a partial replacement.");
+            std::filesystem::remove_all(runDirectory);
+        }
+    }
+
+    // Full-path empty and unreachable instances preserve CLI diagnostics and exit codes.
+    {
+        const auto disconnectedMap = directory / "disconnected.map";
+        const auto disconnectedScenario = directory / "disconnected.scen";
+        {
+            std::ofstream map(disconnectedMap);
+            map << "type octile\nheight 1\nwidth 4\nmap\n.@..\n";
+            std::ofstream scenario(disconnectedScenario);
+            scenario << "version 1\n7 disconnected.map 4 1 0 0 2 0 2\n"
+                << "7 disconnected.map 4 1 2 0 3 0 1\n";
+        }
+        for (int count : {0, 2}) {
+            const auto before = resultDirectories();
+            requireTest(invoke({"mapf_app", "-map", disconnectedMap.string(), "-scen", disconnectedScenario.string(),
+                "-solver", "FullPathRepairIterativeSolver", "-agents", std::to_string(count)}) == (count == 0 ? 0 : 1),
+                "Empty or missing-initial-path run returned the wrong code.");
+            const auto runDirectory = findNewDirectory(before);
+            const auto prefix = runDirectory.filename().string();
+            const auto conflicts = runDirectory / (prefix + "_conflicts.csv");
+            const auto solution = readFile(runDirectory / (prefix + "_solution.csv"));
+            if (count == 0) {
+                requireTest(!std::filesystem::exists(conflicts) && solution.find('\n') == solution.size() - 1,
+                    "Empty run has paths or a conflict file.");
+            } else {
+                requireTest(readFile(conflicts) == "cell_1,cell_2,timestep,conflict_type,agents\n",
+                    "Missing-path failure must write a header-only conflicts file.");
+                requireTest(solution.find("0,7,0-0,2-0,,,-1,-1,false,false\n") != std::string::npos &&
+                    solution.find("1,7,2-0,3-0,2-0|3-0,2-0|3-0,1,1,true,true\n") != std::string::npos,
+                    "Missing and later reachable paths lost alignment.");
+            }
+            std::filesystem::remove_all(runDirectory);
+        }
     }
 
     // Scenario: invalid flags and solver-specific combinations are supplied. Expected: parsing returns code 2 and creates no result directory.
     {
         const std::set<std::filesystem::path> before = resultDirectories();
+        for (const auto& option : std::vector<std::vector<std::string>>{
+            {"-threads", "1"}, {"-continue_if_failed", "false"},
+            {"-localRepairStrategy", "RESOLVE_BY_AGENT"}}) {
+            std::vector<std::string> arguments {"mapf_app", "-map", mapPath.string(),
+                "-scen", scenarioPath.string(), "-solver", "FullPathRepairIterativeSolver", "-agents", "1"};
+            arguments.insert(arguments.end(), option.begin(), option.end());
+            requireTest(invoke(std::move(arguments)) == 2, "Full-path solver accepted an optional flag.");
+        }
         requireTest(
             invoke({
                 "mapf_app", "-map", mapPath.string(), "-scen", scenarioPath.string(),

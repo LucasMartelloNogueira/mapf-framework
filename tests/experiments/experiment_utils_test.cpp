@@ -1,6 +1,7 @@
 #include "experiment_utils.hpp"
 
 #include "mapf/utils.hpp"
+#include "mapf/solvers/full_path_repair_iterative_solver.hpp"
 #include "test_support.hpp"
 
 #include <chrono>
@@ -130,8 +131,9 @@ int main() {
         std::filesystem::remove(path);
     }
 
-    // Scenario: one start-equals-goal iterative run succeeds. Expected: one run directory contains exact stats/solution schemas and CLI metadata, with no conflicts file.
-    {
+    // Successful unit paths preserve schemas and solver metadata for both repair algorithms.
+    for (const std::string solver : {"LocalPathRepairIterativeSolver", "FullPathRepairIterativeSolver"}) {
+        const bool local = solver == "LocalPathRepairIterativeSolver";
         std::vector<std::vector<int>> freeCells {{1}};
         std::vector<mapf::Agent> agents {agent(42, 0, 0, 0, 0)};
         mapf::Instance instance(&freeCells, 1, 1, agents);
@@ -141,11 +143,11 @@ int main() {
             .initialPaths = {path},
             .solutionPaths = {path},
             .numAgents = 1,
-            .solver = "LocalPathRepairIterativeSolver",
-            .continueIfFailed = true,
+            .solver = solver,
+            .continueIfFailed = local,
             .multithreading = false,
             .numThreads = 1,
-            .localRepair = true
+            .localRepair = local
         };
 
         const std::set<std::filesystem::path> before = resultDirectories();
@@ -178,7 +180,7 @@ int main() {
         );
         requireTest(
             readFile(stats).find(
-                ",false,1,LocalPathRepairIterativeSolver,true,RESOLVE_BY_AGENT\n"
+                ",false,1," + solver + (local ? ",true,RESOLVE_BY_AGENT\n" : ",false,-\n")
             ) != std::string::npos,
             "Stats solver metadata is incorrect."
         );
@@ -209,10 +211,27 @@ int main() {
             resultDirectories() == beforeInvalidCount,
             "Mismatched normalized agent count created an artifact bundle."
         );
+        if (!local) {
+            run.numAgents = 1;
+            for (int field = 0; field < 5; ++field) {
+                auto invalid = run;
+                switch (field) {
+                case 0: invalid.continueIfFailed = true; break;
+                case 1: invalid.multithreading = true; break;
+                case 2: invalid.numThreads = 2; break;
+                case 3: invalid.localRepair = true; break;
+                case 4: invalid.localRepairStrategy = mapf::LocalRepairStrategy::RESOLVE_BY_AGENT; break;
+                }
+                requireTest(!mapf::experiments::writeExperimentArtifacts(instance, invalid, 0.5),
+                    "Full-path writer accepted inconsistent solver metadata.");
+            }
+            requireTest(resultDirectories() == beforeInvalidCount, "Invalid full-path metadata created artifacts.");
+        }
     }
 
     // Scenario: local repair fails without a geometric conflict because its only final path is missing. Expected: the run directory contains a header-only conflicts CSV.
-    {
+    for (const std::string solver : {"LocalPathRepairParallelSolver", "FullPathRepairIterativeSolver"}) {
+        const bool local = solver == "LocalPathRepairParallelSolver";
         std::vector<std::vector<int>> freeCells {{1}};
         std::vector<mapf::Agent> agents {agent(1, 0, 0, 0, 0)};
         mapf::Instance instance(&freeCells, 1, 1, agents);
@@ -222,11 +241,11 @@ int main() {
             .initialPaths = {initialPath},
             .solutionPaths = {{}},
             .numAgents = 1,
-            .solver = "LocalPathRepairParallelSolver",
+            .solver = solver,
             .continueIfFailed = false,
-            .multithreading = true,
-            .numThreads = 2,
-            .localRepair = true
+            .multithreading = local,
+            .numThreads = local ? 2U : 1U,
+            .localRepair = local
         };
 
         const std::set<std::filesystem::path> before = resultDirectories();
@@ -244,6 +263,36 @@ int main() {
                 "cell_1,cell_2,timestep,conflict_type,agents\n",
             "Failed run did not write a header-only conflicts artifact."
         );
+        std::filesystem::remove_all(directory);
+    }
+
+    // Serialize the last committed snapshot after a successful group and a failed group.
+    {
+        std::vector<std::vector<int>> free{{0, 0, 0, 1, 1, 1}, {1, 1, 0, 1, 1, 1}, {0, 0, 0, 1, 1, 1}};
+        mapf::Instance instance(&free, 3, 6, {agent(40, 0, 1, 1, 1), agent(41, 1, 1, 0, 1),
+            agent(10, 3, 1, 5, 1), agent(11, 4, 0, 4, 2)});
+        auto result = mapf::FullPathRepairIterativeSolver(instance).solve();
+        mapf::experiments::ExperimentRunResult run{
+            .metrics = result.metrics, .initialPaths = std::move(result.initialPaths),
+            .solutionPaths = std::move(result.paths), .numAgents = 4, .solver = "FullPathRepairIterativeSolver"
+        };
+        const auto before = resultDirectories();
+        requireTest(!run.metrics.success && mapf::experiments::writeExperimentArtifacts(instance, run, 0.5),
+            "Failed full-path snapshot could not be written.");
+        const auto directory = onlyNewDirectory(before, resultDirectories());
+        const auto prefix = directory.filename().string();
+        requireTest(readFile(directory / (prefix + "_conflicts.csv")) ==
+            "cell_1,cell_2,timestep,conflict_type,agents\n0-1,1-1,1,edge,40|41\n",
+            "Failure artifacts retained a repaired conflict or used path indexes as IDs.");
+        const auto solution = readFile(directory / (prefix + "_solution.csv"));
+        requireTest(solution.find("11,-1,4-0,4-2,4-0|4-1|4-2,4-0|4-0|4-1|4-2,2,3,true,true\n") !=
+            std::string::npos, "Committed waits or preserved initial paths were lost in the CSV.");
+        requireTest(solution.find("40,-1,0-1,1-1,0-1|1-1,0-1|1-1,1,1,true,false\n") != std::string::npos,
+            "Uncommitted group paths leaked into the CSV.");
+        const auto stats = readFile(directory / (prefix + "_stats.csv"));
+        requireTest(stats.find("\n-,-,4,false,2,7,3,") != std::string::npos &&
+            stats.find(",false,1,FullPathRepairIterativeSolver,false,-\n") != std::string::npos,
+            "Partial full-path metrics or metadata differ.");
         std::filesystem::remove_all(directory);
     }
 

@@ -33,6 +33,7 @@ add_library(mapf
     src/mapf/pathfinding/sipp/edge_key_hash.cpp
     src/mapf/pathfinding/sipp/state_key.cpp
     src/mapf/pathfinding/sipp/state_key_hash.cpp
+    src/mapf/solvers/full_path_repair_iterative_solver.cpp
     src/mapf/solvers/local_path_repair_iterative_solver.cpp
     src/mapf/solvers/local_path_repair_parallel_solver.cpp
     src/mapf/solvers/local_path_repair_solver_common.cpp
@@ -107,6 +108,16 @@ if(MAPF_BUILD_COLLISION_BENCHMARK)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(full_path_repair_iterative_solver_test
+        tests/solvers/full_path_repair_iterative_solver_test.cpp
+    )
+    target_link_libraries(full_path_repair_iterative_solver_test PRIVATE mapf)
+    target_include_directories(full_path_repair_iterative_solver_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/mapf/solvers
+    )
+    add_test(NAME full_path_repair_iterative_solver_test COMMAND full_path_repair_iterative_solver_test)
+
     add_executable(path_reservation_state_test
         tests/solvers/path_reservation_state_test.cpp
     )

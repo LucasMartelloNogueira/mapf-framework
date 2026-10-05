@@ -30,6 +30,13 @@ namespace mapf::local_path_repair_detail {
 
     void validateLocalRepairStrategy(LocalRepairStrategy strategy);
 
+    void updateResultMetrics(
+        LocalPathRepairResult& result,
+        const std::vector<Agent>& agents,
+        bool requestedSuccess,
+        std::chrono::steady_clock::time_point startedAt
+    );
+
     LocalPathRepairResult repairInitialPaths(
         const Instance& instance,
         std::vector<std::list<Cell*>> initialPaths,
