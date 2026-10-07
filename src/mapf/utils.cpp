@@ -179,6 +179,98 @@ mapf::SolutionConflicts getCollision(const std::vector<std::list<mapf::Cell*>>& 
     return conflicts;
 }
 
+mapf::SolutionConflicts updateSolutionConflicts(
+    std::list<mapf::Cell*> oldPath,
+    std::list<mapf::Cell*> newPath,
+    int index,
+    std::variant<mapf::CellConflict, mapf::EdgeConflict> conflict,
+    mapf::SolutionConflicts conflicts
+) {
+    if (index < 0 || static_cast<std::size_t>(index) >= conflicts.byAgent.size()) {
+        throw std::invalid_argument("The agent index is outside the conflict records.");
+    }
+    if (oldPath.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()) ||
+        newPath.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        throw std::invalid_argument("Path time is unrepresentable.");
+    }
+
+    auto& agentConflicts = conflicts.byAgent[index];
+    const auto matchesConflict = [&conflict](const auto& record) {
+        if (record.index() != conflict.index()) {
+            return false;
+        }
+        if (const auto* vertex = std::get_if<mapf::CellConflict>(&record)) {
+            const auto& target = std::get<mapf::CellConflict>(conflict);
+            return vertex->cell == target.cell && vertex->time == target.time;
+        }
+        const auto& edge = std::get<mapf::EdgeConflict>(record);
+        const auto& target = std::get<mapf::EdgeConflict>(conflict);
+        return edge.cell_1 == target.cell_1 && edge.cell_2 == target.cell_2 &&
+            edge.time == target.time;
+    };
+    if (std::count_if(agentConflicts.begin(), agentConflicts.end(), matchesConflict) != 1) {
+        throw std::invalid_argument("The conflict must occur exactly once for the agent.");
+    }
+
+    int t = 0;
+    mapf::Cell* previous = nullptr;
+    for (mapf::Cell* cell : oldPath) {
+        if (cell == nullptr) {
+            throw std::invalid_argument("Paths must not contain null cells.");
+        }
+        const mapf::CellTime cellTime {cell, t};
+        const auto vertex = conflicts.vertexEvents.find(cellTime);
+        if (vertex != conflicts.vertexEvents.end()) {
+            vertex->second.participants.erase(index);
+        }
+        if (t > 0 && previous != cell) {
+            const mapf::EdgeTime edgeTime = mapf::makeEdgeTime(previous, cell, t);
+            const auto edge = conflicts.edgeEvents.find(edgeTime);
+            if (edge != conflicts.edgeEvents.end()) {
+                if (previous == edgeTime.first) {
+                    edge->second.forward.erase(index);
+                } else {
+                    edge->second.reverse.erase(index);
+                }
+            }
+        }
+        ++t;
+        previous = cell;
+    }
+
+    t = 0;
+    previous = nullptr;
+    for (mapf::Cell* cell : newPath) {
+        if (cell == nullptr) {
+            throw std::invalid_argument("Paths must not contain null cells.");
+        }
+        const mapf::CellTime cellTime {cell, t};
+        conflicts.vertexEvents[cellTime].participants.insert(index);
+        if (t > 0 && previous != cell) {
+            const mapf::EdgeTime edgeTime = mapf::makeEdgeTime(previous, cell, t);
+            mapf::EdgeEvent& edge = conflicts.edgeEvents[edgeTime];
+            if (previous == edgeTime.first) {
+                edge.forward.insert(index);
+            } else {
+                edge.reverse.insert(index);
+            }
+        }
+        ++t;
+        previous = cell;
+    }
+
+    int i = 0;
+    std::vector<std::variant<mapf::CellConflict, mapf::EdgeConflict>> remaining(agentConflicts.size() - 1);
+    for (const auto& record : agentConflicts) {
+        if (!matchesConflict(record)) {
+            remaining[i] = record;
+            ++i;
+        }
+    }
+    agentConflicts = std::move(remaining);
+    return conflicts;
+}
+
 
 
 bool writeRowsToCsvFile(

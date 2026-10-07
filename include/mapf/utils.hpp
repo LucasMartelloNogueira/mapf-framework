@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <list>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "mapf/core/cell.hpp"
@@ -15,6 +16,17 @@ void printPath(const std::list<mapf::Cell*>& path);
 // starts/goals and unrepresentable path indexes/times with std::invalid_argument.
 // Empty path slots stay aligned; global events include virtual destination owners.
 mapf::SolutionConflicts getCollision(const std::vector<std::list<mapf::Cell*>>& paths);
+
+// Updates explicit path memberships and removes exactly one record from byAgent[index].
+// Event entries are retained even when they no longer represent an active conflict.
+// Other agents' records and virtual goal occupancy are not recalculated.
+mapf::SolutionConflicts updateSolutionConflicts(
+    std::list<mapf::Cell*> oldPath,
+    std::list<mapf::Cell*> newPath,
+    int index,
+    std::variant<mapf::CellConflict, mapf::EdgeConflict> conflict,
+    mapf::SolutionConflicts conflicts
+);
 
 
 // Collision predicate only: empty slots do not imply failure. Invalid detector
