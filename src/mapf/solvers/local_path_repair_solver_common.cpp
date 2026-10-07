@@ -1081,20 +1081,6 @@ namespace mapf {
             throw std::invalid_argument("Initial paths must be aligned with instance agents.");
         }
         Grid& grid = const_cast<Grid&>(instance.getGrid());
-        bool allInitialPathsExist = true;
-        for (std::size_t i = 0; i < initialPaths.size(); ++i) {
-            if (initialPaths[i].empty()) {
-                allInitialPathsExist = false;
-                continue;
-            }
-            const std::vector<Cell*> path(initialPaths[i].begin(), initialPaths[i].end());
-            if (path.size() > static_cast<std::size_t>(SAFE_INTERVAL_INFINITY) ||
-                !structurallyValid(path,
-                    grid.getCellPtr(agents[i].startPosition.x, agents[i].startPosition.y),
-                    grid.getCellPtr(agents[i].goalPosition.x, agents[i].goalPosition.y))) {
-                throw std::invalid_argument("Malformed initial path or unsupported SIPP time.");
-            }
-        }
 
         LocalPathRepairResult result;
         result.initialPaths = std::move(initialPaths);
@@ -1102,10 +1088,6 @@ namespace mapf {
         result.initialConflicts = getCollision(result.initialPaths);
         result.remainingConflicts = result.initialConflicts;
         result.reservations = buildReservationState(grid, agents, result.paths);
-        if (!allInitialPathsExist || agents.empty()) {
-            updateResultMetrics(result, agents, allInitialPathsExist, startedAt);
-            return result;
-        }
 
         AStarSippSolver sipp;
         std::size_t revision = 0;

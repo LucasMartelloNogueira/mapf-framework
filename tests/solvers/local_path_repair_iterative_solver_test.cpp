@@ -84,15 +84,15 @@ int main() {
         );
     }
 
-    // Scenario: one initial path is unreachable while a later agent is reachable. Expected: both searches are attempted and every diagnostic slot remains aligned.
-    {
+    // Scenario: one initial path is unreachable while a later agent is reachable. Expected: stop immediately in either continuation mode and keep diagnostic slots aligned.
+    for (bool continueIfFailed : {false, true}) {
         std::vector<std::vector<int>> freeCells {{1, 0, 1, 1}};
         std::vector<mapf::Agent> agents {
             agent(3, 0, 0, 2, 0),
             agent(9, 2, 0, 3, 0)
         };
         mapf::Instance instance(&freeCells, 1, 4, agents);
-        mapf::LocalPathRepairIterativeSolver solver(instance, true);
+        mapf::LocalPathRepairIterativeSolver solver(instance, continueIfFailed);
         mapf::LocalPathRepairResult result = solver.solve();
 
         requireTest(!result.metrics.success, "An unreachable initial path succeeded.");
@@ -100,7 +100,7 @@ int main() {
             result.metrics.numUnresolvedConflicts == 0, "Missing initial path reported conflicts.");
         requireTest(result.initialPaths.size() == 2, "Initial paths are not aligned.");
         requireTest(result.initialPaths[0].empty(), "The unreachable path is not empty.");
-        requireTest(!result.initialPaths[1].empty(), "The later reachable path was not attempted.");
+        requireTest(result.initialPaths[1].empty(), "The later reachable path was attempted after failure.");
         requireSamePaths(
             result.initialPaths,
             result.paths,

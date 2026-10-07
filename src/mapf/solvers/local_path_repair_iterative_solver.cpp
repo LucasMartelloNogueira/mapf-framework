@@ -38,7 +38,17 @@ namespace mapf {
                 agent.goalPosition.x,
                 agent.goalPosition.y
             );
-            initialPaths[i] = solver.solve(grid, start, goal);
+            auto path = solver.solve(grid, start, goal);
+            if (path.empty()) {
+                return local_path_repair_detail::repairInitialPaths(
+                    instance,
+                    std::move(initialPaths),
+                    continueIfFailed,
+                    startedAt,
+                    localRepairStrategy
+                );
+            }
+            initialPaths[i] = std::move(path);
         }
 
         return local_path_repair_detail::repairInitialPaths(
