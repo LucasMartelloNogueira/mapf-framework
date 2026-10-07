@@ -65,6 +65,9 @@
     - Ensure that all code adheres to best practices, including SOLID principles, modularity,
       and reusability.
     - Include error handling, input validation, and unit tests to verify functionality.
+    - focus on readability: make it easy for humans to read
+    - keep functions/methods small: try to keep them under 45 lines
+    - give descriptive names to variables and functions
   
   3. Testing and validation
     - After implementation, run all tests to ensure that the new feature works as expected
@@ -75,6 +78,7 @@
     - Document any new components, hooks, or significant changes made during the implementation
       for future reference and maintenance.
     - Use a directory called `docs/` at the root of the project to store documentation files.
+    - when creating or modifying functions or methods, make sure to include a brief description of what the function/method does, if is not already present
   
   5. Save data for audit
     - the first thing saved in each plan is a datetime of when if was created, the author (the user loged in vscode / copilot/ codex), the time it was last updated and the AI model that was used
