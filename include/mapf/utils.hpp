@@ -37,11 +37,12 @@ mapf::SolutionConflicts updateSolutionConflicts(
 // Includes permanent goal occupancy and other agents' visits affected by the
 // repaired agent's final arrival. Parked owners have global events only after
 // their explicit path ends. Reservation IDs must match byAgent indexes.
-// The state must already include newPath and current goal reservations.
+// The state must already include newPath and current goal reservations;
+// it is read without copying or modifying the reservations.
 // An empty suffix leaves conflicts unchanged.
 mapf::SolutionConflicts UpdateSolutionConflictsV2(
     const std::list<mapf::Cell*>& newPath,
-    mapf::PathReservationState state,
+    const mapf::PathReservationState& state,
     mapf::SolutionConflicts conflicts,
     int agentId,
     int pathIndex

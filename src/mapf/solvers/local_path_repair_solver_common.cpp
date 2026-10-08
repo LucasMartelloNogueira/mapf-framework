@@ -12,7 +12,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -473,13 +472,6 @@ namespace mapf {
         result.remainingConflicts = result.initialConflicts;
         result.reservations = buildReservationState(grid, agents, result.paths);
 
-        std::unordered_map<int, int> pathIndexByAgentId;
-        bool reservationIdsMatchIndexes = true;
-        for (std::size_t i = 0; i < agents.size(); ++i) {
-            pathIndexByAgentId.emplace(agents[i].id, static_cast<int>(i));
-            reservationIdsMatchIndexes = reservationIdsMatchIndexes && agents[i].id == static_cast<int>(i);
-        }
-
         AStarSippSolver sipp;
         std::unordered_set<std::string> visitedConfigurations;
         visitedConfigurations.insert(configurationFingerprint(result.paths, result.paths.size(), {}));
@@ -565,24 +557,8 @@ namespace mapf {
 
             updateReservationState(preparedReservations, newPath, agents[activeIndex].id);
 
-            // V2 uses path indexes, while committed reservations retain agent IDs.
-            PathReservationState conflictReservations = preparedReservations;
-            if (!reservationIdsMatchIndexes) {
-                for (auto& [cell, visits] : conflictReservations.vertex_agents) {
-                    for (auto& [time, participants] : visits) {
-                        std::unordered_set<int> indexedParticipants;
-                        for (int participant : participants) {
-                            indexedParticipants.insert(pathIndexByAgentId.at(participant));
-                        }
-                        participants = std::move(indexedParticipants);
-                    }
-                }
-                for (auto& [cell, goal] : conflictReservations.goal_reservations) {
-                    goal.agentId = pathIndexByAgentId.at(goal.agentId);
-                }
-            }
             SolutionConflicts updatedConflicts = UpdateSolutionConflictsV2(
-                newPath, std::move(conflictReservations), result.remainingConflicts,
+                newPath, preparedReservations, result.remainingConflicts,
                 static_cast<int>(activeIndex), repairStartIndex);
             visitedConfigurations.insert(std::move(nextConfiguration));
             result.paths[activeIndex] = std::move(newPath);

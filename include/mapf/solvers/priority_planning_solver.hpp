@@ -14,6 +14,7 @@ namespace mapf {
 
             explicit PriorityPlanningSolver(const Instance& instance);
 
+            // A permutation of instance agent IDs (the indexes 0..n-1).
             Result solve(std::list<int> agentsOrder);
 
             const std::vector<std::list<Cell*>>& getInitialPaths() const;

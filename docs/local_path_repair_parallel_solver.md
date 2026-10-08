@@ -87,10 +87,10 @@ mapf::LocalPathRepairResult result = solver.solve();
 
 - `safeIntervalTable.safeIntervalsByCell` stores the complement of all vertex reservations;
 - `safeIntervalTable.blockedEdgeArrivals` stores reverse directed edges and their blocked arrival times;
-- `vertex_agents[cell][time]` contains the real `Agent::id` values explicitly visiting that cell at that time, including the last path element; and
+- `vertex_agents[cell][time]` contains the `Agent::id` values explicitly visiting that cell at that time, including the last path element; and
 - `goal_reservations[cell]` contains `GoalReservation{agentId, arrivalTime}`, covering the permanent tail.
 
-Agent IDs may differ from path indexes: slot 0 can belong to ID 42. The reservation maps use real IDs; conflict events use path indexes. Empty occupancy sets/maps and empty edge-time sets are removed. Every grid cell keeps a safe-interval entry: `[0, SAFE_INTERVAL_INFINITY]` means fully free, and an empty vector means fully blocked. Intervals include both endpoints.
+`Instance` guarantees `agents[i].id == i`, assigning IDs in input order and replacing supplied IDs in manually constructed instances. Scenario buckets and positions are preserved. Reservations and conflict events therefore use the same IDs/path indexes. Conflict updates read the prepared reservations by const reference, without ID conversion or an additional state copy. Empty occupancy sets/maps and empty edge-time sets are removed. Every grid cell keeps a safe-interval entry: `[0, SAFE_INTERVAL_INFINITY]` means fully free, and an empty vector means fully blocked. Intervals include both endpoints.
 
 The initial state is built once. Each actual repair attempt makes one complete copy and calls the internal `repairSafeIntervalTable(copy, oldFullPath, agentId)` to exclude that agent. All anchors and the full fallback reuse the same table without changing it during search. After a structurally valid candidate is accepted, `updateReservationState(copy, newFullPath, agentId)` inserts its reservations. Paths, conflicts and reservations are then published together. Rejected attempts discard the copy.
 

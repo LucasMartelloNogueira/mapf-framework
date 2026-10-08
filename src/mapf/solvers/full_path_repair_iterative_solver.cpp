@@ -57,9 +57,9 @@ namespace mapf {
         }
 
         std::tuple<int, int, int, int, int, int, int> eventOrder(
-            const SelectedConflict& selected, const std::vector<Agent>& agents
+            const SelectedConflict& selected
         ) {
-            const int firstId = agents[selected.participants.front()].id;
+            const int firstId = static_cast<int>(selected.participants.front());
             if (const auto* vertex = std::get_if<CellTime>(&selected.key)) {
                 return {firstId, vertex->time, 0, vertex->cell->position.x,
                     vertex->cell->position.y, vertex->cell->position.x, vertex->cell->position.y};
@@ -71,7 +71,7 @@ namespace mapf {
         
         // TODO: entender essa função
         SelectedConflict selectConflict(
-            const SolutionConflicts& conflicts, const std::vector<Agent>& agents
+            const SolutionConflicts& conflicts, std::size_t agentCount
         ) {
             std::optional<SelectedConflict> selected;
             const auto consider = [&](SelectedConflict candidate) {
@@ -81,16 +81,13 @@ namespace mapf {
                 if (participants.size() < 2) {
                     throw std::logic_error("A conflict must have at least two distinct participants.");
                 }
-                std::sort(participants.begin(), participants.end(), [&](std::size_t a, std::size_t b) {
-                    return agents[a].id < agents[b].id;
-                });
-                if (!selected || eventOrder(candidate, agents) < eventOrder(*selected, agents)) {
+                if (!selected || eventOrder(candidate) < eventOrder(*selected)) {
                     selected = std::move(candidate);
                 }
             };
             for (const auto& [key, event] : conflicts.vertexEvents) {
                 SelectedConflict candidate{key, {}};
-                appendParticipants(candidate, event.participants, agents.size());
+                appendParticipants(candidate, event.participants, agentCount);
                 consider(std::move(candidate));
             }
             for (const auto& [key, event] : conflicts.edgeEvents) {
@@ -98,8 +95,8 @@ namespace mapf {
                     throw std::logic_error("Inactive edge event in conflict snapshot.");
                 }
                 SelectedConflict candidate{key, {}};
-                appendParticipants(candidate, event.forward, agents.size());
-                appendParticipants(candidate, event.reverse, agents.size());
+                appendParticipants(candidate, event.forward, agentCount);
+                appendParticipants(candidate, event.reverse, agentCount);
                 consider(std::move(candidate));
             }
             if (!selected) {
@@ -175,7 +172,7 @@ namespace mapf {
 
         AStarSippSolver sipp;
         while (!result.remainingConflicts.empty()) {
-            const auto selected = selectConflict(result.remainingConflicts, agents);
+            const auto selected = selectConflict(result.remainingConflicts, agents.size());
             auto candidatePaths = result.paths;
             auto candidateReservations = result.reservations;
 

@@ -297,7 +297,7 @@ mapf::SolutionConflicts updateSolutionConflicts(
 
 mapf::SolutionConflicts UpdateSolutionConflictsV2(
     const std::list<mapf::Cell*>& newPath,
-    mapf::PathReservationState state,
+    const mapf::PathReservationState& state,
     mapf::SolutionConflicts conflicts,
     int agentId,
     int pathIndex

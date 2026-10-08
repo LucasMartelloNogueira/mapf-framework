@@ -17,7 +17,7 @@ namespace mapf {
         RESOLVE_BY_TIME
     };
 
-    // Explicit occupancy uses real Agent::id values, not path indexes.
+    // Occupants are Agent::id values, equal to path indexes for instance agents.
     using VertexOccupants = std::unordered_map<Cell*,
         std::unordered_map<int, std::unordered_set<int>>>;
 

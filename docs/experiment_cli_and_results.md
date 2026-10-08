@@ -24,8 +24,8 @@ Supported solver names and options are:
 
 Both local strategies are implemented: `RESOLVE_BY_AGENT` uses agent order and
 `RESOLVE_BY_TIME` prioritizes event time. Full-path repair has fixed ascending
-real-ID priority within each event and rejects both optional flags even
-when their supplied values resemble defaults.
+agent-ID priority (instance order) within each event and rejects both optional
+flags even when their supplied values resemble defaults.
 
 Local repair stops at the first conflict for which neither a usable local bridge
 nor complete permanent-goal replanning succeeds. It retains its last committed

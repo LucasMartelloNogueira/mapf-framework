@@ -22,7 +22,8 @@ namespace mapf {
             bool isValidInstance() const;
 
         public:
-            // manual instance
+            // Manual instance: assigns IDs 0..n-1 in input order, replacing
+            // supplied IDs while preserving scenarioId and positions.
             Instance(std::vector<std::vector<int>>* free, int rows, int cols, std::vector<Agent> agents);
 
             // instance from file
@@ -30,6 +31,7 @@ namespace mapf {
 
             Grid& getGrid();
             const Grid& getGrid() const;
+            // Agent IDs always equal their indexes in this vector.
             const std::vector<Agent>& getAgents() const;
             int getNumRows() const;
             int getNumCols() const;

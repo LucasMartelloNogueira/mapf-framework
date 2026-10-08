@@ -147,15 +147,15 @@ int main() {
             result.paths == result.initialPaths && result.remainingConflicts.empty(), "Missing-path diagnostics lost.");
     }
 
-    // Remove BOTH paths first; slot 1 has priority and slot 0 must wait.
+    // Remove BOTH paths first; normalized slot 0 has priority and slot 1 must wait.
     for (const auto& ids : std::vector<std::pair<int, int>>{{42, 7}, {10, -7},
         {std::numeric_limits<int>::max(), std::numeric_limits<int>::min()}}) {
         std::vector<std::vector<int>> free(3, std::vector<int>(3, 1));
         Instance instance(&free, 3, 3, {agent(ids.first, 0, 1, 2, 1), agent(ids.second, 1, 0, 1, 2)});
         const auto result = solveChecked(instance);
         requireTest(result.metrics.success && result.initialConflicts.vertexEvents.size() == 1 &&
-            result.pathCosts == std::vector<int>({3, 2}) && result.paths[1] == result.initialPaths[1],
-            "Full-group removal or real-ID priority is incorrect.");
+            result.pathCosts == std::vector<int>({2, 3}) && result.paths[0] == result.initialPaths[0],
+            "Full-group removal or instance-order priority is incorrect.");
         requireTest(result.metrics.sumOfCosts == 5 && result.metrics.makespan == 3 &&
             result.metrics.injustice == 0.5, "Crossing metrics are incorrect.");
         requireTest(result.metrics.numInitialConflicts == 1 && result.metrics.numResolvedConflicts == 1 &&
@@ -166,7 +166,7 @@ int main() {
     {
         std::vector<std::vector<int>> free(3, std::vector<int>(3, 1));
         Instance instance(&free, 3, 3,
-            {agent(30, 0, 1, 2, 1), agent(10, 1, 0, 1, 2), agent(20, 2, 1, 0, 1)});
+            {agent(0, 1, 0, 1, 2), agent(1, 2, 1, 0, 1), agent(2, 0, 1, 2, 1)});
         const auto result = solveChecked(instance);
         requireTest(result.initialConflicts.vertexEvents.at({instance.getGrid().getCellPtr(1, 1), 1})
             .participants.size() == 3 && result.metrics.success, "Three-agent repair failed.");
@@ -176,11 +176,11 @@ int main() {
     // Replanning the visitor first requires removing that owner's permanent tail.
     {
         std::vector<std::vector<int>> free(3, std::vector<int>(4, 1));
-        Instance instance(&free, 3, 4, {agent(20, 2, 0, 2, 1), agent(5, 0, 1, 3, 1)});
+        Instance instance(&free, 3, 4, {agent(0, 0, 1, 3, 1), agent(1, 2, 0, 2, 1)});
         const auto result = solveChecked(instance);
-        requireTest(result.initialConflicts.byAgent[0].empty() && !result.initialConflicts.vertexEvents.empty(),
+        requireTest(result.initialConflicts.byAgent[1].empty() && !result.initialConflicts.vertexEvents.empty(),
             "Fixture must involve a virtual parked owner.");
-        requireTest(result.metrics.success && result.paths[1] == result.initialPaths[1] && result.pathCosts[0] == 3,
+        requireTest(result.metrics.success && result.paths[0] == result.initialPaths[0] && result.pathCosts[1] == 3,
             "Parked owner was omitted or permanent-goal arrival was not delayed.");
     }
 
@@ -199,22 +199,22 @@ int main() {
         std::vector<std::vector<int>> free(4, std::vector<int>(4, 1));
         free[1][2] = 0;
         free[3][1] = 0;
-        Instance instance(&free, 4, 4, {agent(20, 0, 2, 3, 2), agent(30, 1, 1, 2, 3), agent(1, 3, 2, 0, 2)});
+        Instance instance(&free, 4, 4, {agent(0, 3, 2, 0, 2), agent(1, 0, 2, 3, 2), agent(2, 1, 1, 2, 3)});
         const auto result = solveChecked(instance);
         const auto edge = makeEdgeTime(instance.getGrid().getCellPtr(1, 2), instance.getGrid().getCellPtr(2, 2), 2);
         const auto& event = result.initialConflicts.edgeEvents.at(edge);
         requireTest(event.forward.size() == 2 && event.reverse.size() == 1 && result.metrics.success &&
-            result.paths[2] == result.initialPaths[2], "Multi-participant swap or minimum-ID event order failed.");
+            result.paths[0] == result.initialPaths[0], "Multi-participant swap or minimum-ID event order failed.");
     }
 
     // Overlapping events share a mover, but the first group's outsider remains
     // reserved. Replanning must resolve the mover's later collision as well.
     {
         std::vector<std::vector<int>> free(6, std::vector<int>(5, 1));
-        Instance instance(&free, 6, 5, {agent(10, 0, 2, 4, 2), agent(1, 1, 1, 1, 4), agent(30, 3, 5, 3, 0)});
+        Instance instance(&free, 6, 5, {agent(0, 1, 1, 1, 4), agent(1, 0, 2, 4, 2), agent(2, 3, 5, 3, 0)});
         const auto result = solveChecked(instance);
         requireTest(result.initialConflicts.vertexEvents.size() == 2 && result.metrics.success &&
-            result.paths[2] == result.initialPaths[2] && result.pathCosts == std::vector<int>({5, 3, 5}),
+            result.paths[2] == result.initialPaths[2] && result.pathCosts == std::vector<int>({3, 5, 5}),
             "A group's complete replacement ignored an outsider's future occupancy.");
     }
 
@@ -227,16 +227,19 @@ int main() {
         requireSameConflicts(result.remainingConflicts, result.initialConflicts);
     }
 
-    // Disconnected groups: ID priority commits the crossing before failing the swap.
+    // Disconnected groups: instance order decides whether the crossing precedes the failed swap.
     for (bool failFirst : {false, true}) {
         std::vector<std::vector<int>> free{{0, 0, 0, 1, 1, 1}, {1, 1, 0, 1, 1, 1}, {0, 0, 0, 1, 1, 1}};
-        const int swapId = failFirst ? 0 : 20;
-        const int crossingId = failFirst ? 20 : 0;
-        Instance instance(&free, 3, 6, {agent(swapId, 0, 1, 1, 1), agent(swapId + 1, 1, 1, 0, 1),
-            agent(crossingId, 3, 1, 5, 1), agent(crossingId + 1, 4, 0, 4, 2)});
+        std::vector<Agent> agents{agent(0, 0, 1, 1, 1), agent(1, 1, 1, 0, 1),
+            agent(2, 3, 1, 5, 1), agent(3, 4, 0, 4, 2)};
+        if (!failFirst) {
+            std::rotate(agents.begin(), agents.begin() + 2, agents.end());
+        }
+        Instance instance(&free, 3, 6, agents);
+        const std::size_t swapIndex = failFirst ? 0 : 2;
         const auto result = solveChecked(instance);
-        requireTest(!result.metrics.success && result.paths[0] == result.initialPaths[0] &&
-            result.paths[1] == result.initialPaths[1] && result.remainingConflicts.edgeEvents.size() == 1,
+        requireTest(!result.metrics.success && result.paths[swapIndex] == result.initialPaths[swapIndex] &&
+            result.paths[swapIndex + 1] == result.initialPaths[swapIndex + 1] && result.remainingConflicts.edgeEvents.size() == 1,
             "Failed group changed committed swap paths.");
         requireTest(result.remainingConflicts.vertexEvents.empty() == !failFirst,
             "Event priority or preservation of an earlier successful group failed.");

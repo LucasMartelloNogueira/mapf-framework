@@ -332,7 +332,7 @@ int main() {
         requireTest(!iterative.metrics.success && !parallel.metrics.success, "An impossible component succeeded.");
         requireTest(iterative.paths == parallel.paths, "Adapters differ after rejection.");
         requireSameState(iterative.reservations, parallel.reservations);
-        requireSameState(iterative.reservations, buildReservationState(grid, agents, iterative.paths));
+        requireSameState(iterative.reservations, buildReservationState(grid, instance.getAgents(), iterative.paths));
         if (strategy == LocalRepairStrategy::RESOLVE_BY_AGENT) {
             requireTest(iterative.paths == iterative.initialPaths, "Rejection partially committed a path.");
         } else {
@@ -363,7 +363,7 @@ int main() {
             std::chrono::steady_clock::now(), strategy);
         requireTest(result.metrics.success && validateSolution(result.paths),
             "Complete fallback did not repair the goal conflict.");
-        requireSameState(result.reservations, buildReservationState(grid, agents, result.paths));
+        requireSameState(result.reservations, buildReservationState(grid, instance.getAgents(), result.paths));
     }
     return 0;
 }

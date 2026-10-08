@@ -32,12 +32,13 @@ Following moves and collision-free cycles are allowed.
 Events are ordered by `(minimum participant ID, time, kind, x1, y1, x2, y2)`.
 Vertex events precede edge events when the earlier fields tie; edge endpoints
 use the detector's canonical coordinate order. Within the selected event,
-participants are replanned in ascending real `Agent::id` order.
+participants are replanned in ascending `Agent::id` order.
 
-Conflict participants are path indexes, while reservation ownership and
-priority use real IDs. For agents stored as IDs `[42, 7]`, slot `1` is replanned
-before slot `0`. Result vectors always retain instance order. Scenario buckets
-have no role in priority.
+`Instance` assigns IDs in input order, so `agents[i].id == i`, including for
+manually constructed instances. Conflict participants, reservation ownership,
+and priority use those same IDs/path indexes. Slot `0` has priority over slot
+`1`; reordering the input agents changes their priority. Result vectors always
+retain instance order. Scenario buckets have no role in priority.
 
 ## Reservation lifecycle
 
@@ -124,7 +125,7 @@ and inserted path, performs SIPP searches, and runs global conflict detection.
 Incremental interval updates do not imply that the complete attempt costs only
 the number of changed cells. No numerical speedup is assumed.
 
-The tests cover real-ID ordering, complete-group removal, parked owners,
+The tests cover instance-order priority, complete-group removal, parked owners,
 multi-agent vertex/swap events, independent and overlapping conflicts,
 permanent goal arrivals, failed-group rollback, reservation equivalence,
 metrics, repeatability, and CLI artifacts. Run them with:

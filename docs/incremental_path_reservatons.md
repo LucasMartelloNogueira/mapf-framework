@@ -43,14 +43,14 @@ struct PathReservationState {
 
 | Componente | Significado |
 | --- | --- |
-| `vertex_agents[cell][t]` | IDs reais dos agentes que ocupam explicitamente a célula no instante `t`, incluindo a última posição do caminho. |
+| `vertex_agents[cell][t]` | IDs dos agentes que ocupam explicitamente a célula no instante `t`, incluindo a última posição do caminho. |
 | `goal_reservations[cell]` | Proprietário e instante de início da ocupação permanente do destino. |
 | `safeIntervalTable.safeIntervalsByCell[cell]` | Complemento normalizado da união das ocupações explícitas e permanentes. |
 | `safeIntervalTable.blockedEdgeArrivals[{V,U}]` | Instantes de chegada dos movimentos `U -> V` que impedem uma troca na direção inversa. |
 
 Esses quatro componentes devem permanecer consistentes. Se X e Y ocupam `A` em `5`, excluir X altera o conjunto de proprietários, mas mantém o bloqueio de `A@5`.
 
-Os mapas usam `Agent::id`, enquanto os conflitos usam índices de caminhos. Por exemplo, o agente de ID `42` pode estar no índice `0`; as funções recebem `agents[activeIndex].id` explicitamente. Ser dono de `result.reservations` não identifica o agente de uma lista de células.
+`Instance` atribui `Agent::id` conforme a posição no vetor de agentes: `agents[i].id == i`. Na construção manual, os IDs recebidos são substituídos na cópia interna; `scenarioId` e as posições são preservados. Assim, reservas e conflitos usam os mesmos IDs/índices de caminhos. A atualização dos conflitos recebe as reservas por referência constante, sem conversão de IDs ou cópia adicional. Os helpers continuam recebendo explicitamente o ID do agente cujo caminho será removido ou inserido.
 
 A proposta de reutilizar `GoalOccupancy` foi ajustada: esse tipo é privado de `utils.cpp`, e seu campo `i` representa índice de caminho. `GoalReservation` torna a identidade explícita sem alterar o detector. Como os destinos são únicos, basta um proprietário permanente por célula; outros agentes ainda podem visitá-la temporariamente.
 

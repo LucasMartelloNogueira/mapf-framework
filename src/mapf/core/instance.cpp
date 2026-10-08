@@ -3,9 +3,9 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
-#include <unordered_set>
 #include <unordered_map>
 #include <utility>
 
@@ -80,10 +80,12 @@ namespace mapf {
         mapName("-"),
         instanceName("-")
     {
-        std::unordered_set<int> ids;
+        require(this->agents.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()),
+            "Number of agents is unrepresentable.");
 
-        for (const Agent& agent : this->agents) {
-            require(ids.insert(agent.id).second, "Agent IDs must be unique.");
+        for (std::size_t i = 0; i < this->agents.size(); ++i) {
+            Agent& agent = this->agents[i];
+            agent.id = static_cast<int>(i);
 
             Cell* start = grid.getCellPtr(agent.startPosition.x, agent.startPosition.y);
             Cell* goal = grid.getCellPtr(agent.goalPosition.x, agent.goalPosition.y);

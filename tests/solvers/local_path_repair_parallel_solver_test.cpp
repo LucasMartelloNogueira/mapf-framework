@@ -157,7 +157,7 @@ int main() {
             "The repaired agent's obsolete edge reservation remained committed."
         );
         const auto& goal = result.reservations.goal_reservations.at(oldGoal);
-        requireTest(goal.agentId == 7 && goal.arrivalTime == result.pathCosts[0], "The repaired goal owner/arrival was not refreshed.");
+        requireTest(goal.agentId == 0 && goal.arrivalTime == result.pathCosts[0], "The repaired goal owner/arrival was not refreshed.");
     }
 
     // Scenario: a longer path enters a shorter agent's permanently occupied goal. Expected: the moving agent routes around the stay-at-target reservation.
@@ -294,7 +294,7 @@ int main() {
         requireTest(result.metrics.success, "Start-equals-goal failed.");
         requireTest(result.paths[0].size() == 1 && result.pathCosts[0] == 0, "Start-equals-goal has the wrong path cost.");
         const auto& goal = result.reservations.goal_reservations.at(result.paths[0].back());
-        requireTest(goal.agentId == 42 && goal.arrivalTime == 0, "Start-equals-goal reservation has the wrong owner/arrival.");
+        requireTest(goal.agentId == 0 && goal.arrivalTime == 0, "Start-equals-goal reservation has the wrong owner/arrival.");
     }
 
     return 0;

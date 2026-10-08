@@ -64,7 +64,7 @@ int main() {
         };
         mapf::Instance instance(&freeCells, 2, 3, agents);
         mapf::PriorityPlanningSolver solver(instance);
-        mapf::Result result = solver.solve({20, 10});
+        mapf::Result result = solver.solve({1, 0});
 
         requireTest(result.success, "Reverse priority order failed.");
         requireTest(result.numInitialConflicts == 0 && result.numResolvedConflicts == 0 &&
@@ -74,16 +74,16 @@ int main() {
         requireTest(
             solver.getPaths()[0].front()->position.x == agents[0].startPosition.x &&
                 solver.getPaths()[0].front()->position.y == agents[0].startPosition.y,
-            "Agent 10 path was reordered."
+            "Agent 0 path was reordered."
         );
         requireTest(
             solver.getPaths()[1].front()->position.x == agents[1].startPosition.x &&
                 solver.getPaths()[1].front()->position.y == agents[1].startPosition.y,
-            "Agent 20 path was reordered."
+            "Agent 1 path was reordered."
         );
         requireTest(instance.getAgents()[0].scenarioId == -1, "Manual bucket default is wrong.");
 
-        mapf::Result invalid = solver.solve({10, 10});
+        mapf::Result invalid = solver.solve({0, 0});
         requireTest(!invalid.success, "Duplicate priority IDs were accepted.");
         requireTest(invalid.numInitialConflicts == 0 && invalid.numResolvedConflicts == 0 &&
             invalid.numUnresolvedConflicts == 0, "Invalid priority order reported conflicts.");
@@ -100,7 +100,7 @@ int main() {
         };
         mapf::Instance instance(&freeCells, 1, 3, agents);
         mapf::PriorityPlanningSolver solver(instance);
-        mapf::Result result = solver.solve({10, 20});
+        mapf::Result result = solver.solve({0, 1});
 
         requireTest(!result.success, "An impossible corridor swap unexpectedly succeeded.");
         requireTest(!solver.getPaths()[0].empty(), "The first committed path was lost.");

@@ -85,7 +85,7 @@ int main() {
             mapf::experiments::normalizeConflicts(instance, paths);
         requireTest(conflicts.size() == 1, "Vertex conflicts were not normalized.");
         requireTest(
-            conflicts[0].agentIds == std::vector<int>({2, 5, 8}),
+            conflicts[0].agentIds == std::vector<int>({0, 1, 2}),
             "Normalized agent IDs are incomplete or unsorted."
         );
     }
@@ -192,7 +192,7 @@ int main() {
         );
         requireTest(
             readFile(solution).find(
-                "42,-1,0-0,0-0,0-0,0-0,0,0,true,true"
+                "0,-1,0-0,0-0,0-0,0-0,0,0,true,true"
             ) != std::string::npos,
             "Solution zero-cost serialization is incorrect."
         );
@@ -266,8 +266,8 @@ int main() {
     // Serialize the last committed snapshot after a successful group and a failed group.
     {
         std::vector<std::vector<int>> free{{0, 0, 0, 1, 1, 1}, {1, 1, 0, 1, 1, 1}, {0, 0, 0, 1, 1, 1}};
-        mapf::Instance instance(&free, 3, 6, {agent(40, 0, 1, 1, 1), agent(41, 1, 1, 0, 1),
-            agent(10, 3, 1, 5, 1), agent(11, 4, 0, 4, 2)});
+        mapf::Instance instance(&free, 3, 6, {agent(0, 3, 1, 5, 1), agent(1, 4, 0, 4, 2),
+            agent(2, 0, 1, 1, 1), agent(3, 1, 1, 0, 1)});
         auto result = mapf::FullPathRepairIterativeSolver(instance).solve();
         mapf::experiments::ExperimentRunResult run{
             .metrics = result.metrics, .initialPaths = std::move(result.initialPaths),
@@ -279,12 +279,12 @@ int main() {
         const auto directory = onlyNewDirectory(before, resultDirectories());
         const auto prefix = directory.filename().string();
         requireTest(readFile(directory / (prefix + "_conflicts.csv")) ==
-            "cell_1,cell_2,timestep,conflict_type,agents\n0-1,1-1,1,edge,40|41\n",
-            "Failure artifacts retained a repaired conflict or used path indexes as IDs.");
+            "cell_1,cell_2,timestep,conflict_type,agents\n0-1,1-1,1,edge,2|3\n",
+            "Failure artifacts retained a repaired conflict or used incorrect agent IDs.");
         const auto solution = readFile(directory / (prefix + "_solution.csv"));
-        requireTest(solution.find("11,-1,4-0,4-2,4-0|4-1|4-2,4-0|4-0|4-1|4-2,2,3,true,true\n") !=
+        requireTest(solution.find("1,-1,4-0,4-2,4-0|4-1|4-2,4-0|4-0|4-1|4-2,2,3,true,true\n") !=
             std::string::npos, "Committed waits or preserved initial paths were lost in the CSV.");
-        requireTest(solution.find("40,-1,0-1,1-1,0-1|1-1,0-1|1-1,1,1,true,false\n") != std::string::npos,
+        requireTest(solution.find("2,-1,0-1,1-1,0-1|1-1,0-1|1-1,1,1,true,false\n") != std::string::npos,
             "Uncommitted group paths leaked into the CSV.");
         const auto stats = readFile(directory / (prefix + "_stats.csv"));
         requireTest(stats.find("\n-,-,4,false,2,7,3,") != std::string::npos &&

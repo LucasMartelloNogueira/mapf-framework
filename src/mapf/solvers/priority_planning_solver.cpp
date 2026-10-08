@@ -7,8 +7,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -122,23 +120,14 @@ namespace mapf {
             return result;
         }
 
-        std::unordered_map<int, std::size_t> indexesById;
-        indexesById.reserve(agents.size());
-        for (std::size_t i = 0; i < agents.size(); i++) {
-            indexesById.emplace(agents[i].id, i);
-        }
-
-        std::unordered_set<int> seenIds;
-        std::vector<std::size_t> orderedIndexes;
-        orderedIndexes.reserve(agents.size());
+        std::vector<bool> seenIds(agents.size(), false);
         for (int agentId : agentsOrder) {
-            const auto agentIt = indexesById.find(agentId);
-            if (!seenIds.insert(agentId).second || agentIt == indexesById.end()) {
+            if (agentId < 0 || static_cast<std::size_t>(agentId) >= agents.size() || seenIds[agentId]) {
                 result = summarize(false, initialPaths, paths, startedAt);
                 return result;
             }
 
-            orderedIndexes.push_back(agentIt->second);
+            seenIds[agentId] = true;
         }
 
         Grid& grid = const_cast<Grid&>(instance.getGrid());
@@ -168,7 +157,7 @@ namespace mapf {
         std::vector<std::list<Cell*>> reservedPaths;
         reservedPaths.reserve(agents.size());
 
-        for (std::size_t agentIndex : orderedIndexes) {
+        for (int agentIndex : agentsOrder) {
             const Agent& agent = agents[agentIndex];
             Cell* start = grid.getCellPtr(
                 agent.startPosition.x,

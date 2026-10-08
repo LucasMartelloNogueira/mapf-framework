@@ -21,7 +21,9 @@ O solver mantém os caminhos iniciais, os caminhos correntes, os conflitos resta
 
 Cada posição de um caminho completo corresponde a um instante absoluto: a primeira célula está em `t=0`. Duas células consecutivas iguais representam uma espera. O custo do caminho é a quantidade de elementos menos um.
 
-As reservas usam os IDs reais dos agentes. Os conflitos usam os índices dos caminhos no vetor. Quando esses valores diferem, `repairInitialPaths` converte os IDs de uma cópia das reservas antes de chamar `UpdateSolutionConflictsV2`.
+`Instance` garante que `agents[i].id == i`: os IDs são `0, 1, 2, ...`, seguindo a ordem dos agentes. Na construção manual, os IDs fornecidos são substituídos na cópia armazenada pela instância; `scenarioId` e as posições são preservados. O carregamento de arquivos `.scen` já segue essa convenção. Portanto, caminhos, reservas e conflitos usam a mesma identificação.
+
+`repairInitialPaths` passa as reservas preparadas diretamente para `UpdateSolutionConflictsV2`, por referência constante. Não há mapeamento de IDs nem cópia adicional das reservas para recalcular os conflitos. A cópia usada para preparar e eventualmente descartar o reparo continua existindo.
 
 ## 2. Seleção do conflito e preparação das reservas
 
