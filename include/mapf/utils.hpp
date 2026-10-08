@@ -9,6 +9,10 @@
 #include "mapf/core/cell.hpp"
 #include "mapf/core/solution_conflicts.hpp"
 
+namespace mapf {
+    struct PathReservationState;
+}
+
 void printPath(const std::list<mapf::Cell*>& path);
 
 
@@ -26,6 +30,21 @@ mapf::SolutionConflicts updateSolutionConflicts(
     int index,
     std::variant<mapf::CellConflict, mapf::EdgeConflict> conflict,
     mapf::SolutionConflicts conflicts
+);
+
+// Refreshes vertices from pathIndex and movements after pathIndex; the prefix
+// through pathIndex must be unchanged. Old events no longer visited are removed.
+// Includes permanent goal occupancy and other agents' visits affected by the
+// repaired agent's final arrival. Parked owners have global events only after
+// their explicit path ends. Reservation IDs must match byAgent indexes.
+// The state must already include newPath and current goal reservations.
+// An empty suffix leaves conflicts unchanged.
+mapf::SolutionConflicts UpdateSolutionConflictsV2(
+    const std::list<mapf::Cell*>& newPath,
+    mapf::PathReservationState state,
+    mapf::SolutionConflicts conflicts,
+    int agentId,
+    int pathIndex
 );
 
 

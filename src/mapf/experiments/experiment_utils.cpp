@@ -173,7 +173,6 @@ namespace mapf::experiments {
         bool validSolverMetadata(const ExperimentRunResult& run) {
             if (run.solver == "PriorityPlanningSolver" || run.solver == "FullPathRepairIterativeSolver") {
                 return
-                    !run.continueIfFailed &&
                     !run.multithreading &&
                     run.numThreads == 1 &&
                     !run.localRepair && !run.localRepairStrategy;
@@ -390,7 +389,6 @@ namespace mapf::experiments {
             "multithreading",
             "num_threads",
             "solver",
-            "continue_if_failed",
             "local_repair_strategy",
             "num_inital_conflicts",
             "num_resolved_conflicts",
@@ -410,7 +408,6 @@ namespace mapf::experiments {
             run.multithreading ? "true" : "false",
             std::to_string(run.numThreads),
             run.solver,
-            run.continueIfFailed ? "true" : "false",
             run.localRepair ? strategyName(run.localRepairStrategy.value_or(
                 LocalRepairStrategy::RESOLVE_BY_AGENT)) : "-",
             std::to_string(run.metrics.numInitialConflicts),

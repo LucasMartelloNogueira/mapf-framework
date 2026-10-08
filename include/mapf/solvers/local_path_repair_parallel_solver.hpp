@@ -10,14 +10,12 @@ namespace mapf {
         private:
             const Instance& instance;
             std::size_t numberOfThreads;
-            bool continueIfFailed;
             LocalRepairStrategy localRepairStrategy;
 
         public:
             LocalPathRepairParallelSolver(
                 const Instance& instance,
                 std::size_t numberOfThreads,
-                bool continueIfFailed = false,
                 LocalRepairStrategy localRepairStrategy = LocalRepairStrategy::RESOLVE_BY_AGENT
             );
 

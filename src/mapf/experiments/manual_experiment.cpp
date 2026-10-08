@@ -52,7 +52,6 @@ int main() {
         .solutionPaths = solver.getPaths(),
         .numAgents = instance.getNumAgents(),
         .solver = "PriorityPlanningSolver",
-        .continueIfFailed = false,
         .multithreading = false,
         .numThreads = 1,
         .localRepair = false

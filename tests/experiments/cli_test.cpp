@@ -64,7 +64,6 @@ namespace {
         const std::filesystem::path& mapPath,
         const std::filesystem::path& scenarioPath,
         const std::string& solver,
-        bool continueIfFailed,
         bool parallel
     ) {
         std::vector<std::string> arguments {
@@ -84,10 +83,6 @@ namespace {
         }
         const bool localRepair = solver == "LocalPathRepairIterativeSolver" ||
             solver == "LocalPathRepairParallelSolver";
-        if (localRepair) {
-            arguments.push_back("-continue_if_failed");
-            arguments.push_back(continueIfFailed ? "true" : "false");
-        }
 
         const std::set<std::filesystem::path> before = resultDirectories();
         requireTest(invoke(std::move(arguments)) == 0, solver + " CLI run failed.");
@@ -98,7 +93,7 @@ namespace {
         );
         requireTest(
             stats.rfind(
-                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,continue_if_failed,local_repair_strategy,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts\n",
+                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts\n",
                 0
             ) == 0,
             "Stats header is incorrect."
@@ -111,7 +106,6 @@ namespace {
         requireTest(
             stats.find(
                 "," + solver + "," +
-                (continueIfFailed ? "true" : "false") + "," +
                 (localRepair ? "RESOLVE_BY_AGENT" : "-") + ",0,0,0\n"
             ) != std::string::npos,
             solver + " metadata was not serialized from CLI options."
@@ -145,24 +139,21 @@ int main() {
         mapPath,
         scenarioPath,
         "PriorityPlanningSolver",
-        false,
         false
     );
     requireSuccessfulRun(
         mapPath,
         scenarioPath,
         "LocalPathRepairParallelSolver",
-        false,
         true
     );
     requireSuccessfulRun(
         mapPath,
         scenarioPath,
         "LocalPathRepairIterativeSolver",
-        true,
         false
     );
-    requireSuccessfulRun(mapPath, scenarioPath, "FullPathRepairIterativeSolver", false, false);
+    requireSuccessfulRun(mapPath, scenarioPath, "FullPathRepairIterativeSolver", false);
 
     // Scenario: two agents swap an edge in a one-cell corridor. Expected: CLI returns algorithmic-failure code 1 and writes final paths plus the unresolved normalized conflict.
     {
@@ -186,9 +177,6 @@ int main() {
                 "mapf_app", "-map", corridorMap.string(), "-scen", corridorScenario.string(),
                 "-solver", solver, "-agents", "2"
             };
-            if (solver == "LocalPathRepairIterativeSolver") {
-                arguments.insert(arguments.end(), {"-continue_if_failed", "true"});
-            }
             requireTest(
                 invoke(std::move(arguments)) == 1,
                 "Algorithmic local-repair failure did not return code 1."
@@ -289,7 +277,7 @@ int main() {
                 "-solver", "PriorityPlanningSolver", "-agents", "1",
                 "-continue_if_failed", "false"
             }) == 2,
-            "Priority continuation flag did not return code 2."
+            "Removed flag did not return code 2."
         );
         requireTest(
             invoke({
@@ -297,7 +285,7 @@ int main() {
                 "-solver", "LocalPathRepairIterativeSolver", "-agents", "1",
                 "-continue_if_failed", "yes"
             }) == 2,
-            "Malformed boolean did not return code 2."
+            "Unknown flag did not return code 2."
         );
         requireTest(
             invoke({

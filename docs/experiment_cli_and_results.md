@@ -6,7 +6,7 @@ one self-contained result directory.
 ## Command Line
 
 ```text
-mapf_app -map <map> -scen <scenario> -solver <solver> -agents <n> [-threads <t>] [-continue_if_failed <true|false>] [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>]
+mapf_app -map <map> -scen <scenario> -solver <solver> -agents <n> [-threads <t>] [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>]
 ```
 
 The required flags are `-map`, `-scen`, `-solver`, and `-agents`. Flag/value
@@ -15,24 +15,21 @@ non-negative integer, so a zero-agent experiment is valid.
 
 Supported solver names and options are:
 
-| Solver | `-threads` | `-continue_if_failed` | `-localRepairStrategy` |
-| --- | --- | --- | --- |
-| `PriorityPlanningSolver` | rejected | rejected | rejected |
-| `LocalPathRepairParallelSolver` | required and greater than zero | optional, default `false` | optional, default `RESOLVE_BY_AGENT` |
-| `LocalPathRepairIterativeSolver` | rejected | optional, default `false` | optional, default `RESOLVE_BY_AGENT` |
-| `FullPathRepairIterativeSolver` | rejected | rejected | rejected |
+| Solver | `-threads` | `-localRepairStrategy` |
+| --- | --- | --- |
+| `PriorityPlanningSolver` | rejected | rejected |
+| `LocalPathRepairParallelSolver` | required and greater than zero | optional, default `RESOLVE_BY_AGENT` |
+| `LocalPathRepairIterativeSolver` | rejected | optional, default `RESOLVE_BY_AGENT` |
+| `FullPathRepairIterativeSolver` | rejected | rejected |
 
 Both local strategies are implemented: `RESOLVE_BY_AGENT` uses agent order and
 `RESOLVE_BY_TIME` prioritizes event time. Full-path repair has fixed ascending
-real-ID priority within each event and rejects all three optional flags even
+real-ID priority within each event and rejects both optional flags even
 when their supplied values resemble defaults.
 
-The continuation flag accepts only the exact values `true` and `false`. When it
-is false, local repair stops at the first conflict that neither local repair nor
-full replanning can solve. When true, that conflict is skipped while the paths
-remain unchanged so the solver can attempt other conflicts. Final results
-always describe conflicts that actually remain, not historical repair
-failures.
+Local repair stops at the first conflict for which neither a usable local bridge
+nor complete permanent-goal replanning succeeds. It retains its last committed
+paths and reservations. The former `-continue_if_failed` flag is no longer accepted.
 
 Full-path repair removes all selected participants' old reservations, then
 replans their complete paths with SIPP and inserts each replacement before the
@@ -81,7 +78,7 @@ not exposed under the final prefix.
 ## Statistics Schema
 
 ```text
-map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,continue_if_failed,local_repair_strategy,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts
+map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts
 ```
 
 - `num_agents` is the exact non-negative value supplied through `-agents`.
@@ -99,8 +96,6 @@ map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustic
 - `num_threads` is the configured parallel worker count and `1` for sequential
   solvers.
 - `solver` is exactly one of the four supported CLI names.
-- `continue_if_failed` is its effective boolean value after applying the
-  default; priority planning and full-path repair record `false`.
 - `local_repair_strategy` is the selected strategy for local repair, and `-`
   for priority planning and full-path repair.
 - `num_inital_conflicts` counts normalized vertex and edge conflicts in the

@@ -24,8 +24,6 @@ namespace {
         std::string solver;
         int agents = 0;
         std::optional<std::size_t> threads;
-        bool continueIfFailed = false;
-        bool continueIfFailedProvided = false;
         mapf::LocalRepairStrategy localRepairStrategy = mapf::LocalRepairStrategy::RESOLVE_BY_AGENT;
         bool localRepairStrategyProvided = false;
     };
@@ -34,7 +32,7 @@ namespace {
         output
             << "Usage: " << binary
             << " -map <map> -scen <scenario> -solver <solver> -agents <n>"
-            << " [-threads <t>] [-continue_if_failed <true|false>]"
+            << " [-threads <t>]"
             << " [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>]\n"
             << "Local repair strategy applies to local solvers; default: RESOLVE_BY_AGENT.\n"
             << "Solvers: PriorityPlanningSolver, LocalPathRepairParallelSolver, "
@@ -51,16 +49,6 @@ namespace {
             throw std::invalid_argument(flag + " requires a valid integer.");
         }
         return parsed;
-    }
-
-    bool parseBoolean(const std::string& value, const std::string& flag) {
-        if (value == "true") {
-            return true;
-        }
-        if (value == "false") {
-            return false;
-        }
-        throw std::invalid_argument(flag + " accepts only 'true' or 'false'.");
     }
 
     mapf::LocalRepairStrategy parseLocalRepairStrategy(const std::string& value) {
@@ -80,7 +68,6 @@ namespace {
         std::optional<std::string> solver;
         std::optional<std::string> agents;
         std::optional<std::string> threads;
-        std::optional<std::string> continueIfFailed;
         std::optional<std::string> localRepairStrategy;
 
         for (int index = 1; index < argc; index += 2) {
@@ -102,8 +89,6 @@ namespace {
                 target = &agents;
             } else if (flag == "-threads") {
                 target = &threads;
-            } else if (flag == "-continue_if_failed") {
-                target = &continueIfFailed;
             } else if (flag == "-localRepairStrategy") {
                 target = &localRepairStrategy;
             } else {
@@ -139,14 +124,6 @@ namespace {
             options.threads = static_cast<std::size_t>(parsedThreads);
         }
 
-        if (continueIfFailed) {
-            options.continueIfFailed = parseBoolean(
-                *continueIfFailed,
-                "-continue_if_failed"
-            );
-            options.continueIfFailedProvided = true;
-        }
-
         if (localRepairStrategy) {
             options.localRepairStrategy = parseLocalRepairStrategy(*localRepairStrategy);
             options.localRepairStrategyProvided = true;
@@ -162,11 +139,6 @@ namespace {
                     "-threads is not accepted by PriorityPlanningSolver."
                 );
             }
-            if (options.continueIfFailedProvided) {
-                throw std::invalid_argument(
-                    "-continue_if_failed is not accepted by PriorityPlanningSolver."
-                );
-            }
         } else if (options.solver == "LocalPathRepairParallelSolver") {
             if (!options.threads) {
                 throw std::invalid_argument(
@@ -180,10 +152,10 @@ namespace {
                 );
             }
         } else if (options.solver == "FullPathRepairIterativeSolver") {
-            if (options.threads || options.continueIfFailedProvided || options.localRepairStrategyProvided) {
+            if (options.threads || options.localRepairStrategyProvided) {
                 throw std::invalid_argument(
-                    "FullPathRepairIterativeSolver does not accept -threads, "
-                    "-continue_if_failed, or -localRepairStrategy.");
+                    "FullPathRepairIterativeSolver does not accept -threads "
+                    "or -localRepairStrategy.");
             }
         } else {
             throw std::invalid_argument("Unknown solver '" + options.solver + "'.");
@@ -218,7 +190,6 @@ int runCli(int argc, char* argv[]) {
             run.initialPaths = solver.getInitialPaths();
             run.solutionPaths = solver.getPaths();
             run.solver = "PriorityPlanningSolver";
-            run.continueIfFailed = false;
             run.multithreading = false;
             run.numThreads = 1;
             run.localRepair = false;
@@ -226,7 +197,6 @@ int runCli(int argc, char* argv[]) {
             mapf::LocalPathRepairParallelSolver solver(
                 instance,
                 options.threads.value(),
-                options.continueIfFailed,
                 options.localRepairStrategy
             );
             mapf::LocalPathRepairResult result = solver.solve();
@@ -236,7 +206,6 @@ int runCli(int argc, char* argv[]) {
             run.initialPaths = std::move(result.initialPaths);
             run.solutionPaths = std::move(result.paths);
             run.solver = "LocalPathRepairParallelSolver";
-            run.continueIfFailed = options.continueIfFailed;
             run.multithreading = true;
             run.numThreads = options.threads.value();
             run.localRepair = true;
@@ -244,7 +213,6 @@ int runCli(int argc, char* argv[]) {
         } else if (options.solver == "LocalPathRepairIterativeSolver") {
             mapf::LocalPathRepairIterativeSolver solver(
                 instance,
-                options.continueIfFailed,
                 options.localRepairStrategy
             );
             mapf::LocalPathRepairResult result = solver.solve();
@@ -254,7 +222,6 @@ int runCli(int argc, char* argv[]) {
             run.initialPaths = std::move(result.initialPaths);
             run.solutionPaths = std::move(result.paths);
             run.solver = "LocalPathRepairIterativeSolver";
-            run.continueIfFailed = options.continueIfFailed;
             run.multithreading = false;
             run.numThreads = 1;
             run.localRepair = true;
@@ -268,7 +235,6 @@ int runCli(int argc, char* argv[]) {
             run.initialPaths = std::move(result.initialPaths);
             run.solutionPaths = std::move(result.paths);
             run.solver = "FullPathRepairIterativeSolver";
-            run.continueIfFailed = false;
             run.multithreading = false;
             run.numThreads = 1;
             run.localRepair = false;

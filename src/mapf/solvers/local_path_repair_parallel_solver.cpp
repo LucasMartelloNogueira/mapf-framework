@@ -101,12 +101,10 @@ namespace mapf {
     LocalPathRepairParallelSolver::LocalPathRepairParallelSolver(
         const Instance& instance,
         std::size_t numberOfThreads,
-        bool continueIfFailed,
         LocalRepairStrategy localRepairStrategy
     ) :
         instance(instance),
         numberOfThreads(numberOfThreads),
-        continueIfFailed(continueIfFailed),
         localRepairStrategy(localRepairStrategy)
     {
         local_path_repair_detail::validateLocalRepairStrategy(localRepairStrategy);
@@ -150,7 +148,6 @@ namespace mapf {
         return local_path_repair_detail::repairInitialPaths(
             instance,
             std::move(initialPaths),
-            continueIfFailed,
             startedAt,
             localRepairStrategy
         );

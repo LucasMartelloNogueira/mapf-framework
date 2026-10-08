@@ -8,13 +8,11 @@ namespace mapf {
     class LocalPathRepairIterativeSolver {
         private:
             const Instance& instance;
-            bool continueIfFailed;
             LocalRepairStrategy localRepairStrategy;
 
         public:
             explicit LocalPathRepairIterativeSolver(
                 const Instance& instance,
-                bool continueIfFailed = false,
                 LocalRepairStrategy localRepairStrategy = LocalRepairStrategy::RESOLVE_BY_AGENT
             );
 

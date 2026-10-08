@@ -117,19 +117,20 @@ para cada tentativa efetiva de reparo:
     copiar result.reservations
     remover o caminho completo do agente ativo da cópia
     executar buscas usando essa tabela estável
-    validar o candidato completo
+    validar a estrutura do candidato completo
     se rejeitado: descartar a cópia
     se aceito:
         adicionar o novo caminho completo à cópia
         preparar as demais alterações que possam alocar memória
-        publicar caminhos, conflitos, reservas e revisão consistentes
+        atualizar os conflitos afetados, incluindo as ocupações permanentes
+        publicar caminhos, conflitos e reservas
 ```
 
 Adicionar o novo caminho diretamente ao estado original deixaria reservas obsoletas. Exemplo: a rota antiga passa por `A@5` e a nova por `B@5`; sem exclusão prévia, ambas ficariam reservadas.
 
 Atualizar apenas a janela geométrica também é insuficiente: inserir duas esperas desloca em dois instantes toda a cauda posterior, inclusive sua chegada ao destino. A remoção e inserção dos caminhos completos cobrem as células antigas, as novas e esses deslocamentos.
 
-`result.reservations` guarda o estado confirmado. Rejeição, falha no fallback e avanço por `continueIfFailed` não podem retirar reservas desse estado. Erros de contrato, como proprietário incorreto, segunda remoção ou destino já reservado, devem ser detectados. Falhas de alocação podem inutilizar a cópia em preparação: ela deve ser descartada, sem publicar mudanças parciais no resultado.
+`result.reservations` guarda o estado confirmado. Rejeição e falha no fallback não podem retirar reservas desse estado. Erros de contrato, como proprietário incorreto, segunda remoção ou destino já reservado, devem ser detectados. Falhas de alocação podem inutilizar a cópia em preparação: ela deve ser descartada, sem publicar mudanças parciais no resultado.
 
 Todas as buscas de uma tentativa compartilham a tabela preparada, sem alterá-la. SIPP guarda índices e ponteiros para intervalos: se o índice `1` identifica `[4,+inf]`, fundir esse intervalo com `[0,2]` durante a busca eliminaria o índice. Fazer a exclusão antes das buscas e a inserção após seu término resolve esse risco nesta versão, sem cache por revisão.
 

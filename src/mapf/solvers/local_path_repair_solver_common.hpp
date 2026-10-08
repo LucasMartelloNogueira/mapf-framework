@@ -40,7 +40,6 @@ namespace mapf::local_path_repair_detail {
     LocalPathRepairResult repairInitialPaths(
         const Instance& instance,
         std::vector<std::list<Cell*>> initialPaths,
-        bool continueIfFailed,
         std::chrono::steady_clock::time_point startedAt,
         LocalRepairStrategy localRepairStrategy
     );

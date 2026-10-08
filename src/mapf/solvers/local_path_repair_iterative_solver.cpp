@@ -12,11 +12,9 @@ namespace mapf {
 
     LocalPathRepairIterativeSolver::LocalPathRepairIterativeSolver(
         const Instance& instance,
-        bool continueIfFailed,
         LocalRepairStrategy localRepairStrategy
     ) :
         instance(instance),
-        continueIfFailed(continueIfFailed),
         localRepairStrategy(localRepairStrategy) {
         local_path_repair_detail::validateLocalRepairStrategy(localRepairStrategy);
     }
@@ -43,7 +41,6 @@ namespace mapf {
                 return local_path_repair_detail::repairInitialPaths(
                     instance,
                     std::move(initialPaths),
-                    continueIfFailed,
                     startedAt,
                     localRepairStrategy
                 );
@@ -54,7 +51,6 @@ namespace mapf {
         return local_path_repair_detail::repairInitialPaths(
             instance,
             std::move(initialPaths),
-            continueIfFailed,
             startedAt,
             localRepairStrategy
         );

@@ -128,8 +128,7 @@ scripts/profile_experiment.sh -- \
   -scen benchmarks/scenarios/den520d/random/den520d-random-1.scen \
   -solver LocalPathRepairParallelSolver \
   -agents 100 \
-  -threads 8 \
-  -continue_if_failed true
+  -threads 8
 ```
 
 O script faz duas execuções por padrão: uma para `perf stat` e outra para
@@ -161,8 +160,7 @@ scripts/profile_experiment.sh -- \
   -scen benchmarks/scenarios/den520d/random/den520d-random-1.scen \
   -solver LocalPathRepairParallelSolver \
   -agents 100 \
-  -threads 8 \
-  -continue_if_failed true
+  -threads 8
 ```
 
 O diretório fornecido por `PROFILE_OUTPUT_DIR` não pode existir, para impedir a

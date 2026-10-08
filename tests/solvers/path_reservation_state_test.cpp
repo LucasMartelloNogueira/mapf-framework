@@ -5,6 +5,7 @@
 #include "test_support.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <initializer_list>
 #include <random>
 #include <stdexcept>
@@ -313,8 +314,8 @@ int main() {
         }
     }
 
-    // An impossible component forces fallback rejection alongside a repairable
-    // crossing. Both strategies/adapters must publish only complete revisions.
+    // An impossible component precedes a repairable crossing. Both adapters must
+    // preserve reservations on failure.
     for (auto strategy : {LocalRepairStrategy::RESOLVE_BY_AGENT, LocalRepairStrategy::RESOLVE_BY_TIME}) {
         std::vector<std::vector<int>> freeCells {{0, 0, 0, 1, 1, 1}, {1, 1, 0, 1, 1, 1}, {0, 0, 0, 1, 1, 1}};
         Grid coordinates(3, 6);
@@ -326,19 +327,43 @@ int main() {
         };
         Instance instance(&freeCells, 3, 6, agents);
         Grid& grid = const_cast<Grid&>(instance.getGrid());
-        for (bool continuation : {false, true}) {
-            const auto iterative = LocalPathRepairIterativeSolver(instance, continuation, strategy).solve();
-            const auto parallel = LocalPathRepairParallelSolver(instance, 3, continuation, strategy).solve();
-            requireTest(!iterative.metrics.success && !parallel.metrics.success, "An impossible component succeeded.");
-            requireTest(iterative.paths == parallel.paths, "Adapters differ after rejection/continuation.");
-            requireSameState(iterative.reservations, parallel.reservations);
-            requireSameState(iterative.reservations, buildReservationState(grid, agents, iterative.paths));
-            if (continuation) {
-                requireTest(iterative.remainingConflicts.vertexEvents.empty(), "Later crossing was not repaired.");
-            } else if (strategy == LocalRepairStrategy::RESOLVE_BY_AGENT) {
-                requireTest(iterative.paths == iterative.initialPaths, "Rejection partially committed a path.");
-            }
+        const auto iterative = LocalPathRepairIterativeSolver(instance, strategy).solve();
+        const auto parallel = LocalPathRepairParallelSolver(instance, 3, strategy).solve();
+        requireTest(!iterative.metrics.success && !parallel.metrics.success, "An impossible component succeeded.");
+        requireTest(iterative.paths == parallel.paths, "Adapters differ after rejection.");
+        requireSameState(iterative.reservations, parallel.reservations);
+        requireSameState(iterative.reservations, buildReservationState(grid, agents, iterative.paths));
+        if (strategy == LocalRepairStrategy::RESOLVE_BY_AGENT) {
+            requireTest(iterative.paths == iterative.initialPaths, "Rejection partially committed a path.");
+        } else {
+            requireTest(iterative.remainingConflicts.vertexEvents.empty(), "The crossing was not repaired.");
         }
+    }
+
+    // A collision at the first agent's goal requires a complete fallback.
+    for (auto strategy : {LocalRepairStrategy::RESOLVE_BY_AGENT, LocalRepairStrategy::RESOLVE_BY_TIME}) {
+        std::vector<std::vector<int>> freeCells(2, std::vector<int>(2, 1));
+        Grid coordinates(2, 2);
+        std::vector<Agent> agents {
+            agent(10, coordinates.getCellPtr(0, 0), coordinates.getCellPtr(1, 0)),
+            agent(42, coordinates.getCellPtr(1, 1), coordinates.getCellPtr(0, 0))
+        };
+        Instance instance(&freeCells, 2, 2, agents);
+        Grid& grid = instance.getGrid();
+        const Paths initialPaths {
+            {grid.getCellPtr(0, 0), grid.getCellPtr(1, 0)},
+            {grid.getCellPtr(1, 1), grid.getCellPtr(1, 0), grid.getCellPtr(0, 0)}
+        };
+        Paths fullDetour = initialPaths;
+        fullDetour[0] = {grid.getCellPtr(0, 0), grid.getCellPtr(0, 1),
+            grid.getCellPtr(1, 1), grid.getCellPtr(1, 0)};
+        requireTest(validateSolution(fullDetour), "The full-detour fixture is not solvable.");
+
+        const auto result = repairInitialPaths(instance, initialPaths,
+            std::chrono::steady_clock::now(), strategy);
+        requireTest(result.metrics.success && validateSolution(result.paths),
+            "Complete fallback did not repair the goal conflict.");
+        requireSameState(result.reservations, buildReservationState(grid, agents, result.paths));
     }
     return 0;
 }

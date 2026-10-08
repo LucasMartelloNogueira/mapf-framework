@@ -7,14 +7,11 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
-#include <limits>
-#include <iterator>
 #include <variant>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -25,27 +22,7 @@ namespace mapf {
     namespace {
         struct SelectedConflict {
             std::size_t pathIndex;
-            std::size_t revision;
             std::variant<CellConflict, EdgeConflict> conflict;
-        };
-
-        struct RepairWindow {
-            std::size_t prefixEnd;
-            std::size_t reconnectIndex;
-            std::size_t endOldInclusive;
-            std::optional<int> nextConflictTime;
-        };
-
-        struct LocalCandidate {
-            std::vector<Cell*> path;
-            int validatedThrough;
-            int suffixTimeShift;
-        };
-
-        struct CandidateSnapshot {
-            std::vector<std::list<Cell*>> paths;
-            SolutionConflicts conflicts;
-            std::string fingerprint;
         };
 
         int pathCost(const std::list<Cell*>& path) {
@@ -187,60 +164,6 @@ namespace mapf {
             state.safeIntervalTable.safeIntervalsByCell.insert_or_assign(cell, std::move(safeIntervals));
         }
 
-        const Interval* intervalAt(
-            const SafeIntervalTable& table,
-            Cell* cell,
-            int time
-        ) {
-            const std::unordered_map<Cell*, std::vector<Interval>>::const_iterator cellIntervals = table.safeIntervalsByCell.find(cell);
-            if (cellIntervals == table.safeIntervalsByCell.end()) {
-                return nullptr;
-            }
-
-            for (const Interval& interval : cellIntervals->second) {
-                if (interval.start <= time && time <= interval.end) {
-                    return &interval;
-                }
-            }
-
-            return nullptr;
-        }
-
-        bool edgeBlocked(
-            const SafeIntervalTable& table,
-            Cell* from,
-            Cell* to,
-            int arrivalTime
-        ) {
-            if (from == to) {
-                return false;
-            }
-
-            const std::unordered_map<EdgeKey, std::unordered_set<int>, EdgeKeyHash>::const_iterator blocked = table.blockedEdgeArrivals.find({from, to});
-            return blocked != table.blockedEdgeArrivals.end() &&
-                blocked->second.contains(arrivalTime);
-        }
-
-        bool hasOtherAgent(
-            const VertexOccupants& vertexAgents,
-            Cell* cell,
-            int activeAgentId
-        ) {
-            const auto agentsAtCell = vertexAgents.find(cell);
-            if (agentsAtCell == vertexAgents.end()) {
-                return false;
-            }
-
-            for (const auto& [time, occupants] : agentsAtCell->second) {
-                if (std::any_of(occupants.begin(), occupants.end(), [activeAgentId](int agentId) {
-                        return agentId != activeAgentId;
-                    })) {
-                    return true;
-                }
-            }
-            return false;
-        }
-
         bool isValidStep(Cell* from, Cell* to) {
             if (from == nullptr || to == nullptr) {
                 return false;
@@ -256,597 +179,59 @@ namespace mapf {
             return distance == 1;
         }
 
-        bool structurallyValid(
-            const std::vector<Cell*>& path,
-            Cell* expectedStart,
-            Cell* expectedGoal
-        ) {
-            if (path.empty() || path.front() != expectedStart || path.back() != expectedGoal) {
+        bool structurallyValid(const std::list<Cell*>& path, Cell* start, Cell* goal) {
+            if (path.empty() || path.size() > static_cast<std::size_t>(SAFE_INTERVAL_INFINITY) ||
+                path.front() != start || path.back() != goal) {
                 return false;
             }
-
-            for (std::size_t i = 0; i < path.size(); i++) {
-                if (path[i] == nullptr || !path[i]->isFree) {
+            Cell* previous = nullptr;
+            for (Cell* cell : path) {
+                if (cell == nullptr || !cell->isFree ||
+                    (previous != nullptr && !isValidStep(previous, cell))) {
                     return false;
                 }
-
-                if (i > 0 && !isValidStep(path[i - 1], path[i])) {
-                    return false;
-                }
+                previous = cell;
             }
-
             return true;
         }
 
-        bool sameRecord(
-            const std::variant<CellConflict, EdgeConflict>& first,
-            const std::variant<CellConflict, EdgeConflict>& second
+        std::string configurationFingerprint(
+            const std::vector<std::list<Cell*>>& paths,
+            std::size_t replacedIndex,
+            const std::list<Cell*>& replacement
         ) {
-            if (first.index() != second.index()) {
-                return false;
-            }
-            const CellConflict* vertex = std::get_if<CellConflict>(&first);
-            if (vertex != nullptr) {
-                const CellConflict& other = std::get<CellConflict>(second);
-                return vertex->cell == other.cell && vertex->time == other.time;
-            }
-            const EdgeConflict& edge = std::get<EdgeConflict>(first);
-            const EdgeConflict& other = std::get<EdgeConflict>(second);
-            return edge.cell_1 == other.cell_1 && edge.cell_2 == other.cell_2 && edge.time == other.time;
-        }
-
-        std::string unresolvedConflictFingerprint(
-            std::size_t pathIndex,
-            const std::variant<CellConflict, EdgeConflict>& conflict
-        ) {
-            const CellConflict* vertex = std::get_if<CellConflict>(&conflict);
-            Cell* first = vertex != nullptr ? vertex->cell : std::get<EdgeConflict>(conflict).cell_1;
-            Cell* second = vertex != nullptr ? vertex->cell : std::get<EdgeConflict>(conflict).cell_2;
             std::ostringstream output;
-            output << pathIndex << '|' << conflict.index() << '|' << conflictTime(conflict)
-                << '|' << first->position.x << ',' << first->position.y
-                << '|' << second->position.x << ',' << second->position.y;
-            return output.str();
-        }
-
-        std::optional<SelectedConflict> firstEligibleConflict(
-            std::size_t pathIndex,
-            const SolutionConflicts& conflicts,
-            const std::unordered_set<std::string>& ignored,
-            std::size_t& cursor,
-            std::size_t revision
-        ) {
-            const std::vector<std::variant<CellConflict, EdgeConflict>>& records = conflicts.byAgent[pathIndex];
-            while (cursor < records.size()) {
-                if (!ignored.contains(unresolvedConflictFingerprint(pathIndex, records[cursor]))) {
-                    return SelectedConflict{pathIndex, revision, records[cursor]};
-                }
-                ++cursor;
-            }
-            return std::nullopt;
-        }
-
-        std::optional<SelectedConflict> selectByAgent(
-            const SolutionConflicts& conflicts,
-            const std::unordered_set<std::string>& ignored,
-            std::vector<std::size_t>& cursors,
-            std::size_t revision
-        ) {
-            for (std::size_t i = 0; i < conflicts.byAgent.size(); ++i) {
-                const std::optional<SelectedConflict> candidate = firstEligibleConflict(
-                    i, conflicts, ignored, cursors[i], revision);
-                if (candidate) {
-                    return candidate;
-                }
-            }
-            return std::nullopt;
-        }
-
-        std::optional<SelectedConflict> selectByTime(
-            const SolutionConflicts& conflicts,
-            const std::unordered_set<std::string>& ignored,
-            std::vector<std::size_t>& cursors,
-            std::size_t revision
-        ) {
-            std::optional<SelectedConflict> earliest;
-            for (std::size_t i = 0; i < conflicts.byAgent.size(); ++i) {
-                const std::optional<SelectedConflict> candidate = firstEligibleConflict(
-                    i, conflicts, ignored, cursors[i], revision);
-                // Iteration order breaks identical-record ties by path index.
-                if (candidate && (!earliest || conflictRecordComesBefore(
-                    candidate->conflict, earliest->conflict))) {
-                    earliest = candidate;
-                }
-            }
-            return earliest;
-        }
-
-        bool selectionIsCurrent(
-            const SelectedConflict& selected,
-            const SolutionConflicts& conflicts,
-            std::size_t revision
-        ) {
-            if (selected.revision != revision || selected.pathIndex >= conflicts.byAgent.size()) {
-                return false;
-            }
-            const std::vector<std::variant<CellConflict, EdgeConflict>>& records =
-                conflicts.byAgent[selected.pathIndex];
-            const std::vector<std::variant<CellConflict, EdgeConflict>>::const_iterator record =
-                std::lower_bound(records.begin(), records.end(), selected.conflict, conflictRecordComesBefore);
-            if (record == records.end() || !sameRecord(*record, selected.conflict)) {
-                return false;
-            }
-            const int owner = static_cast<int>(selected.pathIndex);
-            const CellConflict* vertex = std::get_if<CellConflict>(&selected.conflict);
-            if (vertex != nullptr) {
-                const std::unordered_map<CellTime, VertexEvent, CellTimeHash>::const_iterator event =
-                    conflicts.vertexEvents.find({vertex->cell, vertex->time});
-                return event != conflicts.vertexEvents.end() && event->second.participants.size() > 1 &&
-                    event->second.participants.contains(owner);
-            }
-            const EdgeConflict& edge = std::get<EdgeConflict>(selected.conflict);
-            const std::unordered_map<EdgeTime, EdgeEvent, EdgeTimeHash>::const_iterator event =
-                conflicts.edgeEvents.find({edge.cell_1, edge.cell_2, edge.time});
-            return event != conflicts.edgeEvents.end() && event->second.active() &&
-                (event->second.forward.contains(owner) || event->second.reverse.contains(owner));
-        }
-
-        std::optional<RepairWindow> makeRepairWindow(
-            const SelectedConflict& selected,
-            std::size_t pathSize,
-            const std::vector<std::variant<CellConflict, EdgeConflict>>& conflicts
-        ) {
-            const int time = conflictTime(selected.conflict);
-            if (time <= 0 || pathSize == 0 || static_cast<std::size_t>(time) >= pathSize) {
-                return std::nullopt;
-            }
-            std::optional<int> nextTime;
-            for (const std::variant<CellConflict, EdgeConflict>& conflict : conflicts) {
-                if (conflictTime(conflict) > time) {
-                    nextTime = conflictTime(conflict);
-                    break;
-                }
-            }
-            const std::size_t end = nextTime ? static_cast<std::size_t>(*nextTime - 1) : pathSize - 1;
-            const std::size_t reconnect = static_cast<std::size_t>(time) +
-                (std::holds_alternative<CellConflict>(selected.conflict) ? 1 : 0);
-            const std::size_t prefix = static_cast<std::size_t>(time - 1);
-            if (prefix >= reconnect || reconnect > end || end >= pathSize) {
-                return std::nullopt;
-            }
-            return RepairWindow{prefix, reconnect, end, nextTime};
-        }
-
-        std::string configurationFingerprint(const std::vector<std::list<Cell*>>& paths) {
-            std::ostringstream output;
-            output << paths.size() << ':';
-            for (const std::list<Cell*>& path : paths) {
-                output << '[' << path.size() << ':';
+            for (std::size_t i = 0; i < paths.size(); ++i) {
+                const auto& path = i == replacedIndex ? replacement : paths[i];
+                output << path.size() << ':';
                 for (Cell* cell : path) {
                     output << cell->position.x << ',' << cell->position.y << ';';
                 }
-                output << ']';
+                output << '|';
             }
             return output.str();
         }
 
-        std::string attemptFingerprint(
-            const std::string& configuration,
-            const SelectedConflict& selected,
-            const std::unordered_set<std::string>& ignored
-        ) {
-            std::vector<std::string> exclusions(ignored.begin(), ignored.end());
-            std::sort(exclusions.begin(), exclusions.end());
-            std::ostringstream output;
-            output << configuration << '|' << unresolvedConflictFingerprint(selected.pathIndex, selected.conflict);
-            for (const std::string& exclusion : exclusions) {
-                output << '[' << exclusion << ']';
-            }
-            return output.str();
-        }
-
-        bool activeAgentProgress(
-            const SolutionConflicts& before,
-            const SolutionConflicts& after,
-            const SelectedConflict& selected,
-            const std::unordered_set<std::string>& ignored,
-            int oldArrival,
-            int newArrival,
-            int changedFrom,
-            int validatedThrough,
-            bool fullReplacement
-        ) {
-            const int owner = static_cast<int>(selected.pathIndex);
-            const int selectedTime = conflictTime(selected.conflict);
-            // All explicit events in the changed segment, including same-time
-            // vertex/swap ties, must disappear. Later deferred events may remain.
-            for (const std::variant<CellConflict, EdgeConflict>& record : after.byAgent[selected.pathIndex]) {
-                const int time = conflictTime(record);
-                if (fullReplacement || time == selectedTime ||
-                    (time >= changedFrom && time <= validatedThrough)) {
-                    return false;
+        std::optional<SelectedConflict> selectByAgent(const SolutionConflicts& conflicts) {
+            for (std::size_t i = 0; i < conflicts.byAgent.size(); ++i) {
+                if (!conflicts.byAgent[i].empty()) {
+                    return SelectedConflict{i, conflicts.byAgent[i].front()};
                 }
             }
-            // Global membership also covers an active agent arriving early and
-            // becoming a virtual goal owner, which has no byAgent record.
-            for (const std::pair<const CellTime, VertexEvent>& entry : after.vertexEvents) {
-                if (!entry.second.participants.contains(owner)) {
-                    continue;
-                }
-                const int time = entry.first.time;
-                if (fullReplacement || time == selectedTime ||
-                    (time >= changedFrom && time <= validatedThrough)) {
-                    return false;
-                }
-                if (time < selectedTime) {
-                    const std::unordered_map<CellTime, VertexEvent, CellTimeHash>::const_iterator previous =
-                        before.vertexEvents.find(entry.first);
-                    if (!ignored.contains(unresolvedConflictFingerprint(selected.pathIndex,
-                            CellConflict{entry.first.cell, time})) ||
-                        previous == before.vertexEvents.end() ||
-                        previous->second.participants != entry.second.participants ||
-                        (time <= oldArrival) != (time <= newArrival)) {
-                        return false;
-                    }
-                }
-            }
-            for (const std::pair<const EdgeTime, EdgeEvent>& entry : after.edgeEvents) {
-                if (!entry.second.forward.contains(owner) && !entry.second.reverse.contains(owner)) {
-                    continue;
-                }
-                const int time = entry.first.time;
-                if (fullReplacement || time == selectedTime ||
-                    (time >= changedFrom && time <= validatedThrough)) {
-                    return false;
-                }
-                if (time < selectedTime) {
-                    const std::unordered_map<EdgeTime, EdgeEvent, EdgeTimeHash>::const_iterator previous =
-                        before.edgeEvents.find(entry.first);
-                    if (!ignored.contains(unresolvedConflictFingerprint(selected.pathIndex,
-                            EdgeConflict{entry.first.first, entry.first.second, time})) ||
-                        previous == before.edgeEvents.end() ||
-                        previous->second.forward != entry.second.forward ||
-                        previous->second.reverse != entry.second.reverse) {
-                        return false;
-                    }
-                }
-            }
-            return true;
-        }
-
-        std::optional<CandidateSnapshot> evaluateCandidate(
-            const LocalPathRepairResult& result,
-            const SelectedConflict& selected,
-            const std::vector<Cell*>& candidate,
-            const std::unordered_set<std::string>& ignored,
-            const std::unordered_set<std::string>& committedConfigurations,
-            int changedFrom,
-            int validatedThrough,
-            bool fullReplacement
-        ) {
-            CandidateSnapshot provisional;
-            provisional.paths = result.paths;
-            provisional.paths[selected.pathIndex] = std::list<Cell*>(candidate.begin(), candidate.end());
-            provisional.conflicts = getCollision(provisional.paths);
-            if (!activeAgentProgress(result.remainingConflicts, provisional.conflicts, selected, ignored,
-                pathCost(result.paths[selected.pathIndex]), static_cast<int>(candidate.size() - 1),
-                changedFrom, validatedThrough, fullReplacement)) {
-                return std::nullopt;
-            }
-            provisional.fingerprint = configurationFingerprint(provisional.paths);
-            if (committedConfigurations.contains(provisional.fingerprint)) {
-                return std::nullopt;
-            }
-            return provisional;
-        }
-
-        std::optional<int> earliestSafeArrival(
-            const SafeIntervalTable& table,
-            Cell* current,
-            Cell* next,
-            int currentTime,
-            bool requirePermanentGoal
-        ) {
-            if (currentTime < 0 || currentTime >= SAFE_INTERVAL_INFINITY - 1) {
-                return std::nullopt;
-            }
-            const Interval* currentInterval = intervalAt(table, current, currentTime);
-            if (currentInterval == nullptr) {
-                return std::nullopt;
-            }
-
-            const std::unordered_map<Cell*, std::vector<Interval>>::const_iterator nextIntervals = table.safeIntervalsByCell.find(next);
-            if (nextIntervals == table.safeIntervalsByCell.end()) {
-                return std::nullopt;
-            }
-
-            const int latestArrival = currentInterval->end >= SAFE_INTERVAL_INFINITY
-                ? SAFE_INTERVAL_INFINITY
-                : currentInterval->end + 1;
-
-            for (const Interval& nextInterval : nextIntervals->second) {
-                if (requirePermanentGoal && nextInterval.end < SAFE_INTERVAL_INFINITY) {
-                    continue;
-                }
-
-                int arrival = std::max(currentTime + 1, nextInterval.start);
-                const int intervalLatest = std::min({latestArrival, nextInterval.end, SAFE_INTERVAL_INFINITY - 1});
-
-                while (arrival <= intervalLatest && edgeBlocked(table, current, next, arrival)) {
-                    arrival++;
-                }
-
-                if (arrival <= intervalLatest) {
-                    return arrival;
-                }
-            }
-
             return std::nullopt;
         }
 
-        void appendWithoutFirst(
-            std::vector<Cell*>& destination,
-            const std::list<Cell*>& segment
-        ) {
-            bool first = true;
-            for (Cell* cell : segment) {
-                if (first) {
-                    first = false;
-                    continue;
-                }
-
-                destination.push_back(cell);
-            }
-        }
-
-        bool appendDirectTransition(
-            std::vector<Cell*>& candidate,
-            Cell* next,
-            const SafeIntervalTable& table,
-            bool requirePermanentGoal
-        ) {
-            if (candidate.empty() || candidate.size() >= static_cast<std::size_t>(SAFE_INTERVAL_INFINITY)) {
-                return false;
-            }
-            Cell* current = candidate.back();
-            if (next == nullptr || !next->isFree || !isValidStep(current, next)) {
-                return false;
-            }
-
-            const int arrivalTime = static_cast<int>(candidate.size());
-            const Interval* nextInterval = intervalAt(table, next, arrivalTime);
-            if (
-                nextInterval == nullptr ||
-                (requirePermanentGoal && nextInterval->end < SAFE_INTERVAL_INFINITY) ||
-                edgeBlocked(table, current, next, arrivalTime)
-            ) {
-                return false;
-            }
-
-            candidate.push_back(next);
-            return true;
-        }
-
-        bool appendValidatedSegment(
-            std::vector<Cell*>& candidate,
-            const std::list<Cell*>& segment,
-            const SafeIntervalTable& table
-        ) {
-            if (segment.empty() || candidate.empty() || segment.front() != candidate.back() ||
-                candidate.size() > static_cast<std::size_t>(SAFE_INTERVAL_INFINITY) ||
-                segment.size() - 1 > static_cast<std::size_t>(SAFE_INTERVAL_INFINITY) - candidate.size() ||
-                intervalAt(table, candidate.back(), static_cast<int>(candidate.size() - 1)) == nullptr) {
-                return false;
-            }
-            // Validate only the generated segment before splicing it.
-            Cell* previous = candidate.back();
-            std::size_t arrival = candidate.size();
-            for (std::list<Cell*>::const_iterator cell = std::next(segment.begin()); cell != segment.end(); ++cell) {
-                if (*cell == nullptr || !(*cell)->isFree || !isValidStep(previous, *cell) ||
-                    intervalAt(table, *cell, static_cast<int>(arrival)) == nullptr ||
-                    edgeBlocked(table, previous, *cell, static_cast<int>(arrival))) {
-                    return false;
-                }
-                previous = *cell;
-                ++arrival;
-            }
-            appendWithoutFirst(candidate, segment);
-            return true;
-        }
-
-        bool appendScenarioTwoPointThreeSuffix(
-            Grid& grid,
-            const Agent& agent,
-            const std::vector<Cell*>& oldPath,
-            std::size_t suffixStartIndex,
-            std::size_t endOldInclusive,
-            const PathReservationState& committedState,
-            const PathReservationState& repairState,
-            std::vector<Cell*>& candidate
-        ) {
-            if (suffixStartIndex > endOldInclusive || endOldInclusive >= oldPath.size()) {
-                return false;
-            }
-            AStarSippSolver sipp;
-
-            for (
-                std::size_t oldIndex = suffixStartIndex;
-                oldIndex < endOldInclusive;
-                oldIndex++
-            ) {
-                Cell* current = candidate.back();
-                Cell* next = oldPath[oldIndex + 1];
-                const bool nextIsGoal = oldIndex + 1 == oldPath.size() - 1;
-
-                if (current == next) {
-                    if (!appendDirectTransition(
-                        candidate,
-                        next,
-                        repairState.safeIntervalTable,
-                        nextIsGoal
-                    )) {
-                        return false;
-                    }
-
-                    continue;
-                }
-
-                const bool currentHasPotentialConflict = hasOtherAgent(
-                    committedState.vertex_agents,
-                    current,
-                    agent.id
-                );
-                const bool nextHasPotentialConflict = hasOtherAgent(
-                    committedState.vertex_agents,
-                    next,
-                    agent.id
-                );
-
-                // cenário 3
-                if (!currentHasPotentialConflict && nextHasPotentialConflict) {
-                    const int currentTime = static_cast<int>(candidate.size()) - 1;
-                    const std::optional<int> arrivalTime = earliestSafeArrival(
-                        repairState.safeIntervalTable,
-                        current,
-                        next,
-                        currentTime,
-                        nextIsGoal
-                    );
-                    if (!arrivalTime) {
-                        return false;
-                    }
-
-                    for (int time = currentTime + 1; time < *arrivalTime; time++) {
-                        candidate.push_back(current);
-                    }
-
-                    candidate.push_back(next);
-                    continue;
-                }
-
-                // cenário 4
-                if (currentHasPotentialConflict && nextHasPotentialConflict) {
-                    const int currentTime = static_cast<int>(candidate.size()) - 1;
-                    std::list<Cell*> miniPath = sipp.solve(
-                        grid,
-                        current,
-                        next,
-                        repairState.safeIntervalTable,
-                        currentTime
-                    );
-                    if (miniPath.empty()) {
-                        return false;
-                    }
-
-                    if (!appendValidatedSegment(candidate, miniPath, repairState.safeIntervalTable)) {
-                        return false;
-                    }
-                    if (nextIsGoal) {
-                        const Interval* goalInterval = intervalAt(
-                            repairState.safeIntervalTable,
-                            next,
-                            static_cast<int>(candidate.size()) - 1
-                        );
-                        if (
-                            goalInterval == nullptr ||
-                            goalInterval->end < SAFE_INTERVAL_INFINITY
-                        ) {
-                            return false;
-                        }
-                    }
-
-                    continue;
-                }
-
-                if (!appendDirectTransition(
-                    candidate,
-                    next,
-                    repairState.safeIntervalTable,
-                    nextIsGoal
-                )) {
-                    return false;
+        std::optional<SelectedConflict> selectByTime(const SolutionConflicts& conflicts) {
+            std::optional<SelectedConflict> earliest;
+            for (std::size_t i = 0; i < conflicts.byAgent.size(); ++i) {
+                const auto& records = conflicts.byAgent[i];
+                // Iteration order breaks identical-record ties by path index.
+                if (!records.empty() && (!earliest ||
+                    conflictRecordComesBefore(records.front(), earliest->conflict))) {
+                    earliest = SelectedConflict{i, records.front()};
                 }
             }
-
-            return true;
-        }
-
-        std::optional<LocalCandidate> buildLocalCandidate(
-            Grid& grid,
-            const Agent& agent,
-            const std::vector<Cell*>& oldPath,
-            const RepairWindow& window,
-            const std::list<Cell*>& bridge,
-            const PathReservationState& committedState,
-            const PathReservationState& repairState
-        ) {
-            if (bridge.empty() || window.prefixEnd >= window.reconnectIndex ||
-                window.reconnectIndex > window.endOldInclusive || window.endOldInclusive >= oldPath.size() ||
-                bridge.front() != oldPath[window.prefixEnd] || bridge.back() != oldPath[window.reconnectIndex]) {
-                return std::nullopt;
-            }
-            std::vector<Cell*> candidate(oldPath.begin(),
-                oldPath.begin() + static_cast<std::ptrdiff_t>(window.prefixEnd + 1));
-            if (!appendValidatedSegment(candidate, bridge, repairState.safeIntervalTable)) {
-                return std::nullopt;
-            }
-
-            const int originalArrival = static_cast<int>(window.reconnectIndex);
-            const int newArrival = static_cast<int>(candidate.size() - 1);
-            bool potentialConflict = false;
-            for (std::size_t i = window.reconnectIndex; i <= window.endOldInclusive; ++i) {
-                if (hasOtherAgent(committedState.vertex_agents, oldPath[i], agent.id)) {
-                    potentialConflict = true;
-                    break;
-                }
-            }
-
-            // Earlier arrival with interference: wait in one safe interval.
-            if (newArrival < originalArrival && potentialConflict) {
-                const Interval* interval = intervalAt(repairState.safeIntervalTable,
-                    candidate.back(), newArrival);
-                if (interval == nullptr || interval->end < originalArrival) {
-                    return std::nullopt;
-                }
-                candidate.insert(candidate.end(), static_cast<std::size_t>(originalArrival - newArrival),
-                    oldPath[window.reconnectIndex]);
-            }
-
-            if (newArrival > originalArrival && potentialConflict) {
-                if (!appendScenarioTwoPointThreeSuffix(grid, agent, oldPath, window.reconnectIndex,
-                    window.endOldInclusive, committedState, repairState, candidate)) {
-                    return std::nullopt;
-                }
-            } else {
-                // Equal/earlier/uncontested-later cases still validate each
-                // bounded transition; a spatial lookup alone is not safety.
-                for (std::size_t i = window.reconnectIndex; i < window.endOldInclusive; ++i) {
-                    if (!appendDirectTransition(candidate, oldPath[i + 1], repairState.safeIntervalTable,
-                        i + 1 == oldPath.size() - 1)) {
-                        return std::nullopt;
-                    }
-                }
-            }
-
-            const int validatedThrough = static_cast<int>(candidate.size() - 1);
-            const int shift = validatedThrough - static_cast<int>(window.endOldInclusive);
-            const std::size_t tailSize = oldPath.size() - window.endOldInclusive - 1;
-            if (tailSize > static_cast<std::size_t>(SAFE_INTERVAL_INFINITY) - candidate.size()) {
-                return std::nullopt;
-            }
-            if (tailSize > 0 && !isValidStep(candidate.back(), oldPath[window.endOldInclusive + 1])) {
-                return std::nullopt;
-            }
-            // Only copying beyond the bound: temporal evaluation belongs to
-            // the provisional global snapshot, including the first tail edge.
-            candidate.insert(candidate.end(),
-                oldPath.begin() + static_cast<std::ptrdiff_t>(window.endOldInclusive + 1), oldPath.end());
-            const Interval* goalInterval = intervalAt(repairState.safeIntervalTable,
-                candidate.back(), static_cast<int>(candidate.size() - 1));
-            if (goalInterval == nullptr || goalInterval->end < SAFE_INTERVAL_INFINITY) {
-                return std::nullopt;
-            }
-            return LocalCandidate{std::move(candidate), validatedThrough, shift};
+            return earliest;
         }
 
         std::vector<std::size_t> adaptiveAnchors(std::size_t initialAnchor) {
@@ -1071,11 +456,10 @@ namespace mapf {
     LocalPathRepairResult local_path_repair_detail::repairInitialPaths(
         const Instance& instance,
         std::vector<std::list<Cell*>> initialPaths,
-        bool continueIfFailed,
         std::chrono::steady_clock::time_point startedAt,
         LocalRepairStrategy localRepairStrategy
     ) {
-        validateLocalRepairStrategy(localRepairStrategy); // TODO: não validar aqui, essa validação será feita na validação dos args da CLI
+        validateLocalRepairStrategy(localRepairStrategy);
         const std::vector<Agent>& agents = instance.getAgents();
         if (initialPaths.size() != agents.size()) {
             throw std::invalid_argument("Initial paths must be aligned with instance agents.");
@@ -1089,23 +473,25 @@ namespace mapf {
         result.remainingConflicts = result.initialConflicts;
         result.reservations = buildReservationState(grid, agents, result.paths);
 
+        std::unordered_map<int, int> pathIndexByAgentId;
+        bool reservationIdsMatchIndexes = true;
+        for (std::size_t i = 0; i < agents.size(); ++i) {
+            pathIndexByAgentId.emplace(agents[i].id, static_cast<int>(i));
+            reservationIdsMatchIndexes = reservationIdsMatchIndexes && agents[i].id == static_cast<int>(i);
+        }
+
         AStarSippSolver sipp;
-        std::size_t revision = 0;
-        std::vector<std::size_t> cursors(agents.size(), 0);
-        std::unordered_set<std::string> ignoredForRevision;
-        std::unordered_set<std::string> committedConfigurations;
-        std::unordered_set<std::string> attemptedSelections;
-        std::string configuration = configurationFingerprint(result.paths);
-        committedConfigurations.insert(configuration);
+        std::unordered_set<std::string> visitedConfigurations;
+        visitedConfigurations.insert(configurationFingerprint(result.paths, result.paths.size(), {}));
 
         while (true) {
             std::optional<SelectedConflict> selected;
             switch (localRepairStrategy) {
             case LocalRepairStrategy::RESOLVE_BY_AGENT:
-                selected = selectByAgent(result.remainingConflicts, ignoredForRevision, cursors, revision);
+                selected = selectByAgent(result.remainingConflicts);
                 break;
             case LocalRepairStrategy::RESOLVE_BY_TIME:
-                selected = selectByTime(result.remainingConflicts, ignoredForRevision, cursors, revision);
+                selected = selectByTime(result.remainingConflicts);
                 break;
             default:
                 throw std::invalid_argument("Unknown local repair strategy.");
@@ -1113,79 +499,95 @@ namespace mapf {
             if (!selected) {
                 break;
             }
-            if (!selectionIsCurrent(*selected, result.remainingConflicts, revision)) {
-                throw std::logic_error("Stale local repair selection.");
-            }
-            const std::size_t activeIndex = selected->pathIndex;
-            const int selectedTime = conflictTime(selected->conflict);
-            const bool firstAttempt = attemptedSelections.insert(
-                attemptFingerprint(configuration, *selected, ignoredForRevision)).second;
-            std::optional<CandidateSnapshot> accepted;
-            std::optional<PathReservationState> preparedReservations;
 
-            if (firstAttempt) {
-                const std::vector<Cell*> oldPath(result.paths[activeIndex].begin(), result.paths[activeIndex].end());
-                const std::optional<RepairWindow> initialWindow = makeRepairWindow(
-                    *selected, oldPath.size(), result.remainingConflicts.byAgent[activeIndex]);
-                preparedReservations.emplace(result.reservations);
-                PathReservationState& repairState = *preparedReservations;
-                repairSafeIntervalTable(repairState, result.paths[activeIndex], agents[activeIndex].id);
-                if (initialWindow) {
-                    for (std::size_t anchor : adaptiveAnchors(initialWindow->prefixEnd)) {
-                        RepairWindow window = *initialWindow;
-                        window.prefixEnd = anchor;
+            const std::size_t activeIndex = selected->pathIndex;
+            const std::vector<Cell*> oldPath(result.paths[activeIndex].begin(), result.paths[activeIndex].end());
+            PathReservationState preparedReservations = result.reservations;
+            repairSafeIntervalTable(preparedReservations, result.paths[activeIndex], agents[activeIndex].id);
+
+            std::list<Cell*> newPath;
+            std::string nextConfiguration;
+            bool repairSuccess = false;
+            int repairStartIndex = 0;
+            const int time = conflictTime(selected->conflict);
+            if (time > 0 && static_cast<std::size_t>(time) < oldPath.size()) {
+                const std::size_t reconnectIndex = static_cast<std::size_t>(time) +
+                    (std::holds_alternative<CellConflict>(selected->conflict) ? 1 : 0);
+                if (reconnectIndex < oldPath.size()) {
+                    const auto goalOccupation = reconnectIndex + 1 == oldPath.size()
+                        ? AStarSippSolver::GoalOccupation::Permanent
+                        : AStarSippSolver::GoalOccupation::Transient;
+                    for (std::size_t anchor : adaptiveAnchors(static_cast<std::size_t>(time - 1))) {
                         const std::list<Cell*> bridge = sipp.solve(grid, oldPath[anchor],
-                            oldPath[window.reconnectIndex], repairState.safeIntervalTable, static_cast<int>(anchor));
-                        const std::optional<LocalCandidate> candidate = buildLocalCandidate(
-                            grid, agents[activeIndex], oldPath, window, bridge, result.reservations, repairState);
-                        if (!candidate || (window.nextConflictTime && candidate->validatedThrough < selectedTime)) {
+                            oldPath[reconnectIndex], preparedReservations.safeIntervalTable,
+                            static_cast<int>(anchor), goalOccupation);
+                        if (!structurallyValid(bridge, oldPath[anchor], oldPath[reconnectIndex])) {
                             continue;
                         }
-                        accepted = evaluateCandidate(result, *selected, candidate->path, ignoredForRevision,
-                            committedConfigurations, static_cast<int>(anchor), candidate->validatedThrough, false);
-                        if (accepted) {
-                            break;
+                        const std::size_t tailSize = oldPath.size() - reconnectIndex - 1;
+                        const std::size_t limit = static_cast<std::size_t>(SAFE_INTERVAL_INFINITY);
+                        if (bridge.size() > limit - anchor || tailSize > limit - anchor - bridge.size()) {
+                            continue;
                         }
-                    }
-                }
-                if (!accepted) {
-                    const std::list<Cell*> fullPath = sipp.solve(grid, oldPath.front(), oldPath.back(),
-                        repairState.safeIntervalTable, 0, AStarSippSolver::GoalOccupation::Permanent);
-                    const std::vector<Cell*> fullCandidate(fullPath.begin(), fullPath.end());
-                    if (fullCandidate.size() <= static_cast<std::size_t>(SAFE_INTERVAL_INFINITY) &&
-                        structurallyValid(fullCandidate, oldPath.front(), oldPath.back())) {
-                        accepted = evaluateCandidate(result, *selected, fullCandidate, ignoredForRevision,
-                            committedConfigurations, 0, static_cast<int>(fullCandidate.size() - 1), true);
+
+                        // Preserve the prefix and suffix without duplicating the bridge endpoints.
+                        newPath.assign(oldPath.begin(), oldPath.begin() + static_cast<std::ptrdiff_t>(anchor));
+                        newPath.insert(newPath.end(), bridge.begin(), bridge.end());
+                        newPath.insert(newPath.end(),
+                            oldPath.begin() + static_cast<std::ptrdiff_t>(reconnectIndex + 1), oldPath.end());
+                        if (!structurallyValid(newPath, oldPath.front(), oldPath.back())) {
+                            continue;
+                        }
+                        nextConfiguration = configurationFingerprint(result.paths, activeIndex, newPath);
+                        if (visitedConfigurations.contains(nextConfiguration)) {
+                            continue;
+                        }
+                        repairStartIndex = static_cast<int>(anchor);
+                        repairSuccess = true;
+                        break;
                     }
                 }
             }
 
-            if (!accepted) {
-                if (!continueIfFailed) {
-                    updateResultMetrics(result, agents, false, startedAt);
-                    return result;
+            if (!repairSuccess && !oldPath.empty()) {
+                newPath = sipp.solve(grid, oldPath.front(), oldPath.back(),
+                    preparedReservations.safeIntervalTable, 0, AStarSippSolver::GoalOccupation::Permanent);
+                if (structurallyValid(newPath, oldPath.front(), oldPath.back())) {
+                    nextConfiguration = configurationFingerprint(result.paths, activeIndex, newPath);
+                    repairSuccess = !visitedConfigurations.contains(nextConfiguration);
+                    repairStartIndex = 0;
                 }
-                ignoredForRevision.insert(unresolvedConflictFingerprint(activeIndex, selected->conflict));
-                continue;
+            }
+            if (!repairSuccess) {
+                updateResultMetrics(result, agents, false, startedAt);
+                return result;
             }
 
-            // Finish all allocating work before publishing the new revision.
-            updateReservationState(*preparedReservations, accepted->paths[activeIndex], agents[activeIndex].id);
-            if (revision == std::numeric_limits<std::size_t>::max()) {
-                throw std::overflow_error("Local repair revision overflow.");
+            updateReservationState(preparedReservations, newPath, agents[activeIndex].id);
+
+            // V2 uses path indexes, while committed reservations retain agent IDs.
+            PathReservationState conflictReservations = preparedReservations;
+            if (!reservationIdsMatchIndexes) {
+                for (auto& [cell, visits] : conflictReservations.vertex_agents) {
+                    for (auto& [time, participants] : visits) {
+                        std::unordered_set<int> indexedParticipants;
+                        for (int participant : participants) {
+                            indexedParticipants.insert(pathIndexByAgentId.at(participant));
+                        }
+                        participants = std::move(indexedParticipants);
+                    }
+                }
+                for (auto& [cell, goal] : conflictReservations.goal_reservations) {
+                    goal.agentId = pathIndexByAgentId.at(goal.agentId);
+                }
             }
-            committedConfigurations.insert(accepted->fingerprint);
-            static_assert(std::is_nothrow_move_assignable_v<decltype(configuration)>);
-            static_assert(std::is_nothrow_move_assignable_v<decltype(result.paths)>);
-            static_assert(std::is_nothrow_move_assignable_v<SolutionConflicts>);
-            static_assert(std::is_nothrow_move_assignable_v<PathReservationState>);
-            configuration = std::move(accepted->fingerprint);
-            result.paths = std::move(accepted->paths);
-            result.remainingConflicts = std::move(accepted->conflicts);
-            result.reservations = std::move(*preparedReservations);
-            ++revision;
-            ignoredForRevision.clear();
-            std::fill(cursors.begin(), cursors.end(), 0);
+            SolutionConflicts updatedConflicts = UpdateSolutionConflictsV2(
+                newPath, std::move(conflictReservations), result.remainingConflicts,
+                static_cast<int>(activeIndex), repairStartIndex);
+            visitedConfigurations.insert(std::move(nextConfiguration));
+            result.paths[activeIndex] = std::move(newPath);
+            result.remainingConflicts = std::move(updatedConflicts);
+            result.reservations = std::move(preparedReservations);
         }
 
         updateResultMetrics(result, agents, true, startedAt);

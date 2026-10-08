@@ -38,7 +38,7 @@ solução de problemas estão em
 Formato geral:
 
 ```text
-scripts/run_experiment.sh <normal|profile> -- -map <mapa> -scen <cenario> -solver <solver> -agents <n> [-threads <t>] [-continue_if_failed <true|false>] [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>]
+scripts/run_experiment.sh <normal|profile> -- -map <mapa> -scen <cenario> -solver <solver> -agents <n> [-threads <t>] [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>]
 ```
 
 ### Argumentos da CLI
@@ -55,14 +55,13 @@ argumentos opcionais, conforme as regras de cada solver.
 | `-solver` | Estratégia usada para resolver a instância. | Obrigatório. Aceita `PriorityPlanningSolver` (planejamento por prioridade), `LocalPathRepairParallelSolver` (reparo local com cálculo paralelo dos caminhos iniciais), `LocalPathRepairIterativeSolver` (reparo local com cálculo sequencial dos caminhos iniciais) ou `FullPathRepairIterativeSolver` (reparo sequencial dos caminhos completos de todos os participantes do conflito). |
 | `-agents` | Número de agentes usados no experimento. Para `k` agentes, lê os primeiros `k` agentes do arquivo indicado em `-scen`. | Obrigatório. Inteiro maior ou igual a `0`; o cenário deve conter pelo menos essa quantidade de agentes. |
 | `-threads` | Número de threads usadas para encontrar os caminhos iniciais em `LocalPathRepairParallelSolver`. | Inteiro maior que `0`. Obrigatório para `LocalPathRepairParallelSolver` e não aceito pelos outros solvers. |
-| `-continue_if_failed` | Define se o reparo local continua após não conseguir encontrar um caminho sem conflitos para um agente. Com `false`, o experimento para na primeira falha de reparo; com `true`, continua tentando resolver os conflitos dos demais agentes. | `true` ou `false`. Opcional, com padrão `false`. Aceito somente por `LocalPathRepairParallelSolver` e `LocalPathRepairIterativeSolver`. |
 | `-localRepairStrategy` | Estratégia de resolução de conflitos no reparo local: `RESOLVE_BY_AGENT` prioriza a ordem dos agentes; `RESOLVE_BY_TIME` prioriza os conflitos pelo instante em que ocorrem. | `RESOLVE_BY_AGENT` ou `RESOLVE_BY_TIME`. Opcional, com padrão `RESOLVE_BY_AGENT`. Aceito somente por `LocalPathRepairParallelSolver` e `LocalPathRepairIterativeSolver`. |
 
-Nos solvers de reparo local, a busca dos caminhos iniciais é tentada para todos
-os agentes antes da etapa de reparo. Se algum caminho inicial não existir, o
-experimento termina sem sucesso, independentemente de `-continue_if_failed`.
-Continuar após uma falha de reparo permite obter resultados parciais, mas não
-garante uma solução completa.
+Nos solvers de reparo local, cada reparo combina o prefixo preservado, uma ponte
+SIPP e o restante do caminho antigo. Os conflitos do sufixo são atualizados para
+as próximas iterações. Se nenhuma ponte utilizável for encontrada, o solver tenta
+SIPP completo com permanência no destino. Se essa busca também falhar, retorna
+o último estado confirmado. Não há opção de continuar após uma falha.
 
 O `FullPathRepairIterativeSolver` também tenta todos os caminhos iniciais com
 A*. Para cada conflito, retira as reservas de todos os participantes e recalcula
@@ -70,7 +69,7 @@ seus caminhos completos com SIPP em ordem crescente de ID, inserindo cada novo
 caminho antes da próxima busca. Se algum participante falhar, descarta as
 alterações daquele grupo e retorna o último estado confirmado. Usa uma única
 construção inicial da tabela de reservas e atualizações incrementais durante o
-reparo. Aceita somente os quatro argumentos obrigatórios; as três flags opcionais
+reparo. Aceita somente os quatro argumentos obrigatórios; as duas flags opcionais
 são rejeitadas mesmo quando recebem valores iguais aos padrões dos outros solvers.
 
 O script `scripts/run_experiment.sh` também recebe:
@@ -102,8 +101,7 @@ scripts/run_experiment.sh normal -- \
   -scen benchmarks/scenarios/den520d/random/den520d-random-1.scen \
   -solver LocalPathRepairParallelSolver \
   -agents 100 \
-  -threads 8 \
-  -continue_if_failed true
+  -threads 8
 ```
 
 Reparo local com caminhos iniciais calculados sequencialmente:
@@ -113,8 +111,7 @@ scripts/run_experiment.sh normal -- \
   -map benchmarks/maps/den520d.map \
   -scen benchmarks/scenarios/den520d/random/den520d-random-1.scen \
   -solver LocalPathRepairIterativeSolver \
-  -agents 100 \
-  -continue_if_failed false
+  -agents 100
 ```
 
 Reparo de caminhos completos:
@@ -145,7 +142,7 @@ O arquivo de conflitos existe quando um solver de reparo local ou o
 `FullPathRepairIterativeSolver` termina sem sucesso. Pode conter apenas o cabeçalho
 quando a falha decorre de um caminho ausente. Resultados parciais continuam
 disponíveis nos CSVs de estatísticas e solução. O reparo completo registra
-`local_repair_strategy=-`, `continue_if_failed=false` e uma thread.
+`local_repair_strategy=-` e uma thread.
 
 Os schemas, códigos de saída, convenções de custo e comportamento em falhas
 estão detalhados em [`docs/experiment_cli_and_results.md`](docs/experiment_cli_and_results.md).

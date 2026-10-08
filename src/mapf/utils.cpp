@@ -1,9 +1,11 @@
 #include "mapf/utils.hpp"
+#include "mapf/solvers/local_path_repair_solver.hpp"
 
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -265,12 +267,199 @@ mapf::SolutionConflicts updateSolutionConflicts(
         if (!matchesConflict(record)) {
             remaining[i] = record;
             ++i;
+        } else if (const auto* vertex = std::get_if<mapf::CellConflict>(&conflict)) {
+            const mapf::CellTime cellTime {vertex->cell, vertex->time};
+            const auto event = conflicts.vertexEvents.find(cellTime);
+            if (event != conflicts.vertexEvents.end() && event->second.participants.size() == 1) {
+                const int remainingAgent = *event->second.participants.begin();
+                if (remainingAgent != index) {
+                    std::erase_if(conflicts.byAgent[remainingAgent], matchesConflict);
+                }
+            }
+        } else {
+            const auto& edge = std::get<mapf::EdgeConflict>(conflict);
+            const mapf::EdgeTime edgeTime = mapf::makeEdgeTime(edge.cell_1, edge.cell_2, edge.time);
+            const auto event = conflicts.edgeEvents.find(edgeTime);
+            if (event != conflicts.edgeEvents.end() && !event->second.active()) {
+                const auto& remainingAgents = event->second.forward.empty()
+                    ? event->second.reverse : event->second.forward;
+                for (int remainingAgent : remainingAgents) {
+                    if (remainingAgent != index) {
+                        std::erase_if(conflicts.byAgent[remainingAgent], matchesConflict);
+                    }
+                }
+            }
         }
     }
     agentConflicts = std::move(remaining);
     return conflicts;
 }
 
+mapf::SolutionConflicts UpdateSolutionConflictsV2(
+    const std::list<mapf::Cell*>& newPath,
+    mapf::PathReservationState state,
+    mapf::SolutionConflicts conflicts,
+    int agentId,
+    int pathIndex
+) {
+    if (agentId < 0 || static_cast<std::size_t>(agentId) >= conflicts.byAgent.size()) {
+        throw std::invalid_argument("The agent ID must be a valid byAgent index.");
+    }
+    if (pathIndex < 0 || static_cast<std::size_t>(pathIndex) > newPath.size()) {
+        throw std::invalid_argument("The path index is outside the path.");
+    }
+    if (newPath.size() > static_cast<std::size_t>(std::numeric_limits<int>::max())) {
+        throw std::invalid_argument("Path time is unrepresentable.");
+    }
+    const std::vector<mapf::Cell*> path(newPath.begin(), newPath.end());
+    for (mapf::Cell* cell : path) {
+        if (cell == nullptr) {
+            throw std::invalid_argument("Paths must not contain null cells.");
+        }
+    }
+    if (static_cast<std::size_t>(pathIndex) == path.size()) {
+        return conflicts;
+    }
+
+    const auto explicitOccupantsAt = [&state](mapf::Cell* cell, int time) -> const std::unordered_set<int>* {
+        const auto vertex = state.vertex_agents.find(cell);
+        if (vertex == state.vertex_agents.end()) {
+            return nullptr;
+        }
+        const auto occupants = vertex->second.find(time);
+        return occupants == vertex->second.end() ? nullptr : &occupants->second;
+    };
+    const auto sameConflict = [](const auto& first, const auto& second) {
+        return !mapf::conflictRecordComesBefore(first, second) &&
+            !mapf::conflictRecordComesBefore(second, first);
+    };
+    const auto setAgentConflict = [&](int participant, const auto& record, bool present) {
+        if (participant < 0 || static_cast<std::size_t>(participant) >= conflicts.byAgent.size()) {
+            throw std::invalid_argument("Reservation agent IDs must be valid byAgent indexes.");
+        }
+        auto& records = conflicts.byAgent[participant];
+        if (!present) {
+            std::erase_if(records, [&](const auto& existing) { return sameConflict(existing, record); });
+            return;
+        }
+        const auto position = std::lower_bound(records.begin(), records.end(), record, mapf::conflictRecordComesBefore);
+        if (position == records.end() || !sameConflict(*position, record)) {
+            records.insert(position, record);
+        }
+    };
+
+    std::unordered_set<mapf::CellTime, mapf::CellTimeHash> affectedVertices;
+    std::unordered_set<mapf::EdgeTime, mapf::EdgeTimeHash> affectedEdges;
+    // Old records can refer to cells and edges no longer visited by the new path.
+    for (const auto& record : conflicts.byAgent[agentId]) {
+        if (const auto* vertex = std::get_if<mapf::CellConflict>(&record)) {
+            if (vertex->time >= pathIndex) {
+                affectedVertices.insert({vertex->cell, vertex->time});
+            }
+        } else {
+            const auto& edge = std::get<mapf::EdgeConflict>(record);
+            if (edge.time > pathIndex) {
+                affectedEdges.insert(mapf::makeEdgeTime(edge.cell_1, edge.cell_2, edge.time));
+            }
+        }
+    }
+    // Parked owners participate in global events, but have no byAgent record
+    // after their explicit path ends. Their previous events still need cleanup.
+    for (const auto& [key, event] : conflicts.vertexEvents) {
+        if (key.time >= pathIndex && event.participants.contains(agentId)) {
+            affectedVertices.insert(key);
+        }
+    }
+    for (std::size_t i = static_cast<std::size_t>(pathIndex); i < path.size(); ++i) {
+        affectedVertices.insert({path[i], static_cast<int>(i)});
+        // The prefix through pathIndex is unchanged; include the first modified movement.
+        if (i > static_cast<std::size_t>(pathIndex) && path[i - 1] != path[i]) {
+            affectedEdges.insert(mapf::makeEdgeTime(path[i - 1], path[i], static_cast<int>(i)));
+        }
+    }
+    // Changing this agent's final arrival can affect other paths even beyond
+    // its own explicit end. Scan the finite visits to its destination.
+    const auto goalVisits = state.vertex_agents.find(path.back());
+    if (goalVisits != state.vertex_agents.end()) {
+        for (const auto& [time, participants] : goalVisits->second) {
+            if (time >= pathIndex) {
+                affectedVertices.insert({path.back(), time});
+            }
+        }
+    }
+
+    for (const auto& key : affectedVertices) {
+        const mapf::CellConflict record{key.cell, key.time};
+        const auto* explicitParticipants = explicitOccupantsAt(key.cell, key.time);
+        std::unordered_set<int> participants = explicitParticipants == nullptr
+            ? std::unordered_set<int>{} : *explicitParticipants;
+        const auto goal = state.goal_reservations.find(key.cell);
+        if (goal != state.goal_reservations.end() && key.time >= goal->second.arrivalTime) {
+            participants.insert(goal->second.agentId);
+        }
+
+        const bool active = participants.size() > 1;
+        std::unordered_set<int> affectedParticipants = participants;
+        affectedParticipants.insert(agentId);
+        const auto oldEvent = conflicts.vertexEvents.find(key);
+        if (oldEvent != conflicts.vertexEvents.end()) {
+            affectedParticipants.insert(oldEvent->second.participants.begin(), oldEvent->second.participants.end());
+        }
+        for (int participant : affectedParticipants) {
+            // Virtual occupancy belongs to the global event only. The moving
+            // participant owns the repair record after the parked path ends.
+            setAgentConflict(participant, record, active && explicitParticipants != nullptr &&
+                explicitParticipants->contains(participant));
+        }
+        if (active) {
+            conflicts.vertexEvents.insert_or_assign(key, mapf::VertexEvent{std::move(participants)});
+        } else {
+            conflicts.vertexEvents.erase(key);
+        }
+    }
+
+    for (const auto& key : affectedEdges) {
+        const mapf::EdgeConflict record{key.first, key.second, key.time};
+        const auto* firstBefore = explicitOccupantsAt(key.first, key.time - 1);
+        const auto* secondNow = explicitOccupantsAt(key.second, key.time);
+        const auto* secondBefore = explicitOccupantsAt(key.second, key.time - 1);
+        const auto* firstNow = explicitOccupantsAt(key.first, key.time);
+        mapf::EdgeEvent event;
+        if (firstBefore != nullptr && secondNow != nullptr) {
+            for (int participant : *firstBefore) {
+                if (secondNow->contains(participant)) {
+                    event.forward.insert(participant);
+                }
+            }
+        }
+        if (secondBefore != nullptr && firstNow != nullptr) {
+            for (int participant : *secondBefore) {
+                if (firstNow->contains(participant)) {
+                    event.reverse.insert(participant);
+                }
+            }
+        }
+        std::unordered_set<int> affectedParticipants = event.forward;
+        affectedParticipants.insert(event.reverse.begin(), event.reverse.end());
+        affectedParticipants.insert(agentId);
+        const auto oldEvent = conflicts.edgeEvents.find(key);
+        if (oldEvent != conflicts.edgeEvents.end()) {
+            affectedParticipants.insert(oldEvent->second.forward.begin(), oldEvent->second.forward.end());
+            affectedParticipants.insert(oldEvent->second.reverse.begin(), oldEvent->second.reverse.end());
+        }
+        const bool active = event.active();
+        for (int participant : affectedParticipants) {
+            setAgentConflict(participant, record, active &&
+                (event.forward.contains(participant) || event.reverse.contains(participant)));
+        }
+        if (active) {
+            conflicts.edgeEvents.insert_or_assign(key, std::move(event));
+        } else {
+            conflicts.edgeEvents.erase(key);
+        }
+    }
+    return conflicts;
+}
 
 
 bool writeRowsToCsvFile(

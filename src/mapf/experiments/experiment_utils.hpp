@@ -34,7 +34,6 @@ namespace mapf::experiments {
         std::vector<std::list<Cell*>> solutionPaths;
         int numAgents = 0;
         std::string solver;
-        bool continueIfFailed = false;
         bool multithreading = false;
         std::size_t numThreads = 1;
         bool localRepair = false;

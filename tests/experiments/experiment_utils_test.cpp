@@ -144,7 +144,6 @@ int main() {
             .solutionPaths = {path},
             .numAgents = 1,
             .solver = solver,
-            .continueIfFailed = local,
             .multithreading = false,
             .numThreads = 1,
             .localRepair = local
@@ -169,7 +168,7 @@ int main() {
         requireTest(!std::filesystem::exists(conflicts), "Successful run wrote conflicts.");
         requireTest(
             readFile(stats).rfind(
-                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,continue_if_failed,local_repair_strategy,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts\n",
+                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts\n",
                 0
             ) == 0,
             "Stats header is incorrect."
@@ -180,7 +179,7 @@ int main() {
         );
         requireTest(
             readFile(stats).find(
-                ",false,1," + solver + (local ? ",true,RESOLVE_BY_AGENT,0,0,0\n" : ",false,-,0,0,0\n")
+                ",false,1," + solver + (local ? ",RESOLVE_BY_AGENT,0,0,0\n" : ",-,0,0,0\n")
             ) != std::string::npos,
             "Stats solver metadata is incorrect."
         );
@@ -213,14 +212,13 @@ int main() {
         );
         if (!local) {
             run.numAgents = 1;
-            for (int field = 0; field < 5; ++field) {
+            for (int field = 0; field < 4; ++field) {
                 auto invalid = run;
                 switch (field) {
-                case 0: invalid.continueIfFailed = true; break;
-                case 1: invalid.multithreading = true; break;
-                case 2: invalid.numThreads = 2; break;
-                case 3: invalid.localRepair = true; break;
-                case 4: invalid.localRepairStrategy = mapf::LocalRepairStrategy::RESOLVE_BY_AGENT; break;
+                case 0: invalid.multithreading = true; break;
+                case 1: invalid.numThreads = 2; break;
+                case 2: invalid.localRepair = true; break;
+                case 3: invalid.localRepairStrategy = mapf::LocalRepairStrategy::RESOLVE_BY_AGENT; break;
                 }
                 requireTest(!mapf::experiments::writeExperimentArtifacts(instance, invalid, 0.5),
                     "Full-path writer accepted inconsistent solver metadata.");
@@ -242,7 +240,6 @@ int main() {
             .solutionPaths = {{}},
             .numAgents = 1,
             .solver = solver,
-            .continueIfFailed = false,
             .multithreading = local,
             .numThreads = local ? 2U : 1U,
             .localRepair = local
