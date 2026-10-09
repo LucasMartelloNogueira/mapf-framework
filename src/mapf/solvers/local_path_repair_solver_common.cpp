@@ -12,6 +12,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -22,6 +24,114 @@ namespace mapf {
         struct SelectedConflict {
             std::size_t pathIndex;
             std::variant<CellConflict, EdgeConflict> conflict;
+        };
+
+        // Keep the original nodes so rollback can restore erased entries without
+        // allocating. Only entries touched by the old or replacement path are copied.
+        template<class Map>
+        class ReservationMapUndo {
+        public:
+            explicit ReservationMapUndo(Map& target) : target(target) {}
+            ReservationMapUndo(const ReservationMapUndo&) = delete;
+            ReservationMapUndo& operator=(const ReservationMapUndo&) = delete;
+
+            ~ReservationMapUndo() { rollback(); }
+
+            void remember(const typename Map::key_type& key) {
+                auto [saved, inserted] = originals.try_emplace(key);
+                if (!inserted) {
+                    return;
+                }
+                const auto entry = target.find(key);
+                if (entry != target.end()) {
+                    // Record ownership before copying: even a failed allocation
+                    // leaves the original entry available for rollback.
+                    saved->second = target.extract(entry);
+                    target.emplace(saved->second.key(), saved->second.mapped());
+                }
+                // An empty saved node records that this key did not exist.
+            }
+
+            void rollback() noexcept {
+                if (!active) {
+                    return;
+                }
+                // Erase ALL tentative entries before restoring any originals.
+                // The maps never shrink/rehash explicitly during a transaction,
+                // so their buckets still fit the original size. Node insertion
+                // needs no allocation; these pointer/edge hashers do not throw.
+                for (const auto& [key, original] : originals) {
+                    target.erase(key);
+                }
+                for (auto& [key, original] : originals) {
+                    if (!original.empty()) {
+                        target.insert(std::move(original));
+                    }
+                }
+                active = false;
+            }
+
+            void commit() noexcept { active = false; }
+
+        private:
+            Map& target;
+            std::unordered_map<typename Map::key_type, typename Map::node_type,
+                typename Map::hasher, typename Map::key_equal> originals;
+            bool active = true;
+        };
+
+        class ReservationTransaction {
+        public:
+            explicit ReservationTransaction(PathReservationState& state) :
+                state(state), intervals(state.safeIntervalTable.safeIntervalsByCell),
+                vertices(state.vertex_agents), edges(state.safeIntervalTable.blockedEdgeArrivals),
+                goals(state.goal_reservations) {}
+
+            void removePath(const std::list<Cell*>& path, int agentId) {
+                rememberPath(path);
+                local_path_repair_detail::repairSafeIntervalTable(state, path, agentId);
+            }
+
+            void insertPath(const std::list<Cell*>& path, int agentId) {
+                rememberPath(path);
+                local_path_repair_detail::updateReservationState(state, path, agentId);
+            }
+
+            void rollback() noexcept {
+                intervals.rollback();
+                vertices.rollback();
+                edges.rollback();
+                goals.rollback();
+            }
+
+            void commit() noexcept {
+                intervals.commit();
+                vertices.commit();
+                edges.commit();
+                goals.commit();
+            }
+
+        private:
+            void rememberPath(const std::list<Cell*>& path) {
+                Cell* previous = nullptr;
+                for (Cell* cell : path) {
+                    intervals.remember(cell);
+                    vertices.remember(cell);
+                    if (previous != nullptr && previous != cell) {
+                        edges.remember({cell, previous});
+                    }
+                    previous = cell;
+                }
+                if (!path.empty()) {
+                    goals.remember(path.back());
+                }
+            }
+
+            PathReservationState& state;
+            ReservationMapUndo<SafeIntervalsByCell> intervals;
+            ReservationMapUndo<VertexOccupants> vertices;
+            ReservationMapUndo<BlockedEdgeArrivals> edges;
+            ReservationMapUndo<decltype(PathReservationState::goal_reservations)> goals;
         };
 
         int pathCost(const std::list<Cell*>& path) {
@@ -366,8 +476,8 @@ namespace mapf {
             goal->second.arrivalTime != static_cast<int>(oldPath.size()) - 1) {
             throw std::logic_error("The path's goal reservation does not match its owner and arrival.");
         }
-        // Validate every membership before changing any entry. All later allocation
-        // failures affect only this disposable state, never the committed result.
+        // Validate every membership before changing any entry. The caller must
+        // protect later mutations with an undo log or a disposable state copy.
         std::unordered_set<Cell*> affectedCells;
         int time = 0;
         for (Cell* cell : oldPath) {
@@ -494,8 +604,8 @@ namespace mapf {
 
             const std::size_t activeIndex = selected->pathIndex;
             const std::vector<Cell*> oldPath(result.paths[activeIndex].begin(), result.paths[activeIndex].end());
-            PathReservationState preparedReservations = result.reservations;
-            repairSafeIntervalTable(preparedReservations, result.paths[activeIndex], agents[activeIndex].id);
+            ReservationTransaction repair(result.reservations);
+            repair.removePath(result.paths[activeIndex], agents[activeIndex].id);
 
             std::list<Cell*> newPath;
             std::string nextConfiguration;
@@ -511,7 +621,7 @@ namespace mapf {
                         : AStarSippSolver::GoalOccupation::Transient;
                     for (std::size_t anchor : adaptiveAnchors(static_cast<std::size_t>(time - 1))) {
                         const std::list<Cell*> bridge = sipp.solve(grid, oldPath[anchor],
-                            oldPath[reconnectIndex], preparedReservations.safeIntervalTable,
+                            oldPath[reconnectIndex], result.reservations.safeIntervalTable,
                             static_cast<int>(anchor), goalOccupation);
                         if (!structurallyValid(bridge, oldPath[anchor], oldPath[reconnectIndex])) {
                             continue;
@@ -543,7 +653,7 @@ namespace mapf {
 
             if (!repairSuccess && !oldPath.empty()) {
                 newPath = sipp.solve(grid, oldPath.front(), oldPath.back(),
-                    preparedReservations.safeIntervalTable, 0, AStarSippSolver::GoalOccupation::Permanent);
+                    result.reservations.safeIntervalTable, 0, AStarSippSolver::GoalOccupation::Permanent);
                 if (structurallyValid(newPath, oldPath.front(), oldPath.back())) {
                     nextConfiguration = configurationFingerprint(result.paths, activeIndex, newPath);
                     repairSuccess = !visitedConfigurations.contains(nextConfiguration);
@@ -551,19 +661,26 @@ namespace mapf {
                 }
             }
             if (!repairSuccess) {
+                // Restore before returning: result may be moved before local
+                // destructors run when named return value optimization is absent.
+                repair.rollback();
                 updateResultMetrics(result, agents, false, startedAt);
                 return result;
             }
 
-            updateReservationState(preparedReservations, newPath, agents[activeIndex].id);
+            repair.insertPath(newPath, agents[activeIndex].id);
 
             SolutionConflicts updatedConflicts = UpdateSolutionConflictsV2(
-                newPath, preparedReservations, result.remainingConflicts,
+                newPath, result.reservations, result.remainingConflicts,
                 static_cast<int>(activeIndex), repairStartIndex);
             visitedConfigurations.insert(std::move(nextConfiguration));
+            // All allocating work finished. Publishing cannot leave paths and
+            // reservations inconsistent if an earlier operation throws.
+            static_assert(std::is_nothrow_move_assignable_v<decltype(newPath)>);
+            static_assert(std::is_nothrow_move_assignable_v<SolutionConflicts>);
             result.paths[activeIndex] = std::move(newPath);
             result.remainingConflicts = std::move(updatedConflicts);
-            result.reservations = std::move(preparedReservations);
+            repair.commit();
         }
 
         updateResultMetrics(result, agents, true, startedAt);

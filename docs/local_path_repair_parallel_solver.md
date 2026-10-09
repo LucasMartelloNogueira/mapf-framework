@@ -92,13 +92,13 @@ mapf::LocalPathRepairResult result = solver.solve();
 
 `Instance` guarantees `agents[i].id == i`, assigning IDs in input order and replacing supplied IDs in manually constructed instances. Scenario buckets and positions are preserved. Reservations and conflict events therefore use the same IDs/path indexes. Conflict updates read the prepared reservations by const reference, without ID conversion or an additional state copy. Empty occupancy sets/maps and empty edge-time sets are removed. Every grid cell keeps a safe-interval entry: `[0, SAFE_INTERVAL_INFINITY]` means fully free, and an empty vector means fully blocked. Intervals include both endpoints.
 
-The initial state is built once. Each actual repair attempt makes one complete copy and calls the internal `repairSafeIntervalTable(copy, oldFullPath, agentId)` to exclude that agent. All anchors and the full fallback reuse the same table without changing it during search. After a structurally valid candidate is accepted, `updateReservationState(copy, newFullPath, agentId)` inserts its reservations. Paths, conflicts and reservations are then published together. Rejected attempts discard the copy.
+The initial state is built once. Each repair opens a `ReservationTransaction` on the current state and saves only the map entries affected by the old path before excluding it with `repairSafeIntervalTable`. All anchors and the full fallback reuse the same table without changing it during search. Before `updateReservationState` inserts an accepted candidate, the transaction also saves any previously untouched entries affected by that path. Each cell/edge/goal entry is saved once per attempt. Paths and conflicts are published after allocating work finishes, then the transaction is committed. There is no full reservation copy or replacement on this local-repair path.
 
 Each helper regenerates safe intervals once per distinct cell in its supplied path, using the union of remaining explicit visits and permanent occupancy. Removing one of two agents at the same time does not free that time. Removing a parked owner also preserves later visits by other agents. Insertion can split intervals, and removal can create, extend or merge them. The complete old and new paths are used so waits shifting a suffix also shift its edge times and goal arrival.
 
 For a move `U -> V` arriving at `t`, the blocked SIPP edge is `{V,U}` at `t`. After exclusion, this entry remains while the owner sets at `(U,t-1)` and `(V,t)` intersect. This preserves shared movements without a separate edge-owner index; waits do not contribute edges.
 
-These internal helpers require a matching complete registered path for removal and prior removal before replacement. Null cells/unsupported lengths throw `std::invalid_argument`; detected ownership mismatches or occupied destination insertion throw `std::logic_error`. Empty paths are no-ops. All contract checks precede mutations; an allocation failure during mutation can leave the disposable copy partial, so it must be discarded. The committed result is never the mutation target.
+These internal helpers require a matching complete registered path for removal and prior removal before replacement. Null cells/unsupported lengths throw `std::invalid_argument`; detected ownership mismatches or occupied destination insertion throw `std::logic_error`. Empty paths are no-ops. Mutations must be protected by a transaction or performed on a disposable copy. Local repair uses an undo log holding original map nodes: failure or exceptions erase tentative entries and restore those nodes without allocation. Buckets do not shrink during a transaction, and tentative entries are erased before restoring originals. Explicit rollback precedes a failure return so restoration occurs before the result can be moved.
 
 ## Conflict Selection And Local Bridges
 
@@ -164,10 +164,10 @@ For `A` agents, total finite path length `L`, `V` grid cells, and `T` actual rep
 - initial planning runs `A` A* searches with at most the configured worker count active;
 - conflict detection indexes explicit occupancy and movements, with additional sorting of per-agent conflict records;
 - the one initial reservation build is bounded by `O(V + L log L)`, with sorting performed per cell;
-- each of the `T` attempts copies the reservation state, costing `O(V + L)` in stored entries under expected hash-table costs;
+- each attempt saves entries for cells, reverse edges and destinations touched by the old/new paths, including other agents' reservations in those entries; there is no `O(V + L)` full-state copy per attempt;
 - removal/insertion traverse the supplied paths, scan/sort occupancy only at affected cells, and check remaining owners of affected movements; and
 - adaptive local repair performs at most logarithmically many anchor attempts before one complete fallback for a selected conflict.
 
 The temporal owner index increases storage and copy costs. Local regeneration is not simply `O(path length)`: crowded cells and edge endpoint sets require examining other agents too. Candidate path copying, incremental conflict updates and configuration fingerprinting remain separate costs. See the [consolidated reservation documentation](incremental_path_reservatons.md) for the problem, design decisions, validation, and performance limits.
 
-TODO: Optimize the full state copy and affected-event scans only after profiling representative workloads.
+Configuration fingerprinting and affected-event scans remain separate opportunities for optimization.

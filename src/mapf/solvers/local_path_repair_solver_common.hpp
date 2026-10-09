@@ -17,9 +17,10 @@ namespace mapf::local_path_repair_detail {
         std::optional<std::size_t> excludedPathIndex = std::nullopt
     );
 
-    // Mutate a disposable copy. Paths must be complete, with time starting at zero.
+    // Mutate state protected by an undo log or a disposable copy.
+    // Paths must be complete, with time starting at zero.
     // Removal requires the registered path; insertion requires its prior removal.
-    // After an allocation failure, discard the temporary state.
+    // After an allocation failure, restore the log or discard the temporary state.
     void repairSafeIntervalTable(
         PathReservationState& state, const std::list<Cell*>& oldPath, int agentId
     );

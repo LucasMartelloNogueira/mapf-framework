@@ -13,13 +13,13 @@ Antes desta melhoria, o motor compartilhado de reparo local repetia a construç�
 | Momento | Trabalho anterior | Abordagem aprovada |
 | --- | --- | --- |
 | Inicialização | Construir `result.reservations` com todos os caminhos. | Manter uma construção completa inicial. |
-| Preparação do reparo | Reconstruir as reservas excluindo o agente ativo. | Copiar o estado confirmado e remover somente as contribuições desse agente. |
+| Preparação do reparo | Reconstruir as reservas excluindo o agente ativo. | Registrar as entradas afetadas e remover somente as contribuições desse agente. |
 | Fallback do caminho completo | Copiar os demais caminhos e chamar a sobrecarga do SIPP que constrói outra tabela. | Reutilizar a tabela preparada, com política de destino permanente. |
-| Aceitação | Reconstruir todas as reservas dos caminhos atualizados. | Adicionar o novo caminho à cópia que já excluiu o antigo e publicar o estado. |
+| Aceitação | Reconstruir todas as reservas dos caminhos atualizados. | Proteger as entradas adicionais, inserir o novo caminho no estado e confirmar as alterações. |
 
 Uma tentativa aceita após fallback podia, portanto, provocar três construções completas além da inicial: exclusão, fallback e aceitação. As diferentes âncoras de uma mesma tentativa já compartilhavam a tabela; não havia uma reconstrução por âncora.
 
-O objetivo é eliminar essas reconstruções e recalcular intervalos somente nas células dos caminhos removido e inserido. **A cópia completa por tentativa foi mantida por decisão explícita**, para simplificar o isolamento das alterações; sua otimização fica para uma etapa posterior.
+O objetivo é eliminar essas reconstruções e recalcular intervalos somente nas células dos caminhos removido e inserido. A primeira implementação manteve uma cópia completa por tentativa. Após o diagnóstico de desempenho, o reparo local passou a usar um registro das entradas afetadas para desfazer alterações, eliminando essa cópia. O solver de reparo completo mantém seu isolamento por cópia.
 
 ## 2. Dados necessários para desfazer reservas
 
@@ -97,7 +97,7 @@ O estado inicial pode conter colisões; por isso, movimentos compartilhados prec
 
 ## 5. Exclusão, busca e confirmação
 
-As duas operações alteram uma cópia de `PathReservationState` e recebem um caminho **completo**, começando em tempo absoluto zero:
+As duas operações alteram `PathReservationState` protegido por um registro de alterações ou isolado em uma cópia descartável. Elas recebem um caminho **completo**, começando em tempo absoluto zero:
 
 ```cpp
 void repairSafeIntervalTable(
@@ -114,23 +114,23 @@ O fluxo em `repairInitialPaths` é:
 ```text
 construir result.reservations uma vez
 para cada tentativa efetiva de reparo:
-    copiar result.reservations
-    remover o caminho completo do agente ativo da cópia
+    registrar entradas afetadas pelo caminho antigo
+    remover o caminho completo do agente ativo do estado
     executar buscas usando essa tabela estável
     validar a estrutura do candidato completo
-    se rejeitado: descartar a cópia
+    se rejeitado: restaurar as entradas registradas
     se aceito:
-        adicionar o novo caminho completo à cópia
+        proteger entradas adicionais e adicionar o novo caminho completo ao estado
         preparar as demais alterações que possam alocar memória
         atualizar os conflitos afetados, incluindo as ocupações permanentes
-        publicar caminhos, conflitos e reservas
+        publicar caminhos e conflitos e confirmar a transação das reservas
 ```
 
 Adicionar o novo caminho diretamente ao estado original deixaria reservas obsoletas. Exemplo: a rota antiga passa por `A@5` e a nova por `B@5`; sem exclusão prévia, ambas ficariam reservadas.
 
 Atualizar apenas a janela geométrica também é insuficiente: inserir duas esperas desloca em dois instantes toda a cauda posterior, inclusive sua chegada ao destino. A remoção e inserção dos caminhos completos cobrem as células antigas, as novas e esses deslocamentos.
 
-`result.reservations` guarda o estado confirmado. Rejeição e falha no fallback não podem retirar reservas desse estado. Erros de contrato, como proprietário incorreto, segunda remoção ou destino já reservado, devem ser detectados. Falhas de alocação podem inutilizar a cópia em preparação: ela deve ser descartada, sem publicar mudanças parciais no resultado.
+Durante a tentativa local, `result.reservations` contém alterações provisórias protegidas por `ReservationTransaction`. Cada entrada afetada é registrada uma única vez; os nós originais são preservados e a tentativa trabalha sobre cópias apenas de seus valores. Rejeição, falha no fallback ou exceções removem as entradas provisórias e reinserem os nós originais sem alocação. Os mapas mantêm capacidade para o tamanho anterior. A restauração explícita precede o retorno por falha, e a confirmação ocorre depois das operações que podem alocar memória. Erros de contrato, como proprietário incorreto, segunda remoção ou destino já reservado, continuam sendo detectados.
 
 Todas as buscas de uma tentativa compartilham a tabela preparada, sem alterá-la. SIPP guarda índices e ponteiros para intervalos: se o índice `1` identifica `[4,+inf]`, fundir esse intervalo com `[0,2]` durante a busca eliminaria o índice. Fazer a exclusão antes das buscas e a inserção após seu término resolve esse risco nesta versão, sem cache por revisão.
 
@@ -178,11 +178,11 @@ Se `V` é o número de células, `L` a soma dos comprimentos dos caminhos e `b_c
 O(V + L + soma_c(b_c log b_c))
 ```
 
-Essa estimativa considera custos esperados dos mapas hash. A abordagem incremental mantém uma construção inicial e troca as reconstruções seguintes por uma cópia e operações locais. A cópia ainda custa `O(V + L)` em entradas armazenadas, além das alocações dos contêineres.
+Essa estimativa considera custos esperados dos mapas hash. A abordagem incremental mantém uma construção inicial e troca as reconstruções seguintes por operações locais. O registro para restauração copia somente os valores das entradas afetadas: vetores de intervalos, ocupações temporais das células, conjuntos de tempos das arestas e reservas de destino. Seu custo depende dessas entradas, incluindo reservas de outros agentes que compartilham as mesmas células ou arestas, sem percorrer o estado completo a cada tentativa.
 
 A remoção/inserção percorre o caminho enviado, reúne suas células distintas e consulta as ocupações restantes dessas células e dos extremos dos movimentos afetados. Portanto, seu custo não é somente `O(tamanho do caminho)`: células disputadas podem conter muitas visitas a ordenar, e conjuntos de agentes precisam ser consultados para preservar arestas compartilhadas.
 
-Espera-se reduzir trabalho quando cada reparo afeta poucas células em relação ao mapa. Entretanto, os conjuntos temporais aumentam memória e custo de cópia; regiões muito disputadas reduzem a vantagem. Buscas SIPP, cópias de candidatos, cálculo de impressões digitais e detecção global de conflitos continuam consumindo tempo. Menos células recalculadas não garante uma redução proporcional no tempo total.
+Espera-se reduzir trabalho quando cada reparo afeta poucas células em relação ao mapa. Entretanto, os conjuntos temporais aumentam memória e custo de registro; regiões muito disputadas reduzem a vantagem. Buscas SIPP, cópias de candidatos, cálculo de impressões digitais e atualização de conflitos continuam consumindo tempo. Menos células recalculadas não garante uma redução proporcional no tempo total.
 
 ## 9. Validação da correção e do desempenho
 
@@ -209,7 +209,7 @@ Além dessa comparação, usar resultados esperados independentes para evitar qu
 - Tentativas rejeitadas, continuação após falha e substituições sucessivas.
 - Células e arestas não afetadas preservadas; ambos os adaptadores e ambas as estratégias.
 
-Para medir desempenho, comparar as mesmas instâncias, estratégia, número de trabalhadores, compilador e procedimento de repetição. Separar construção inicial, cópia, exclusão, inserção, SIPP, detecção de conflitos e tempo total. Contar construções completas, células regeneradas e cópias; registrar também pico de memória. A expectativa estrutural é uma construção inicial, uma cópia por tentativa efetiva e nenhuma reconstrução completa no laço ou fallback.
+Para medir desempenho, comparar as mesmas instâncias, estratégia, número de trabalhadores, compilador e procedimento de repetição. Separar construção inicial, registro das entradas, exclusão, inserção, SIPP, detecção de conflitos e tempo total. Contar construções completas e células/arestas registradas e regeneradas; registrar também pico de memória. A expectativa estrutural do reparo local é uma construção inicial, um registro das entradas afetadas por tentativa e nenhuma cópia ou reconstrução completa no laço ou fallback. Os resultados históricos abaixo se referem à implementação anterior, que ainda copiava o estado.
 
 Os quatro testes citados na análise original validavam a base anterior à implementação; esse resultado histórico não demonstra correção nem ganho da atualização incremental.
 

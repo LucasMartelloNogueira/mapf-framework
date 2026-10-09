@@ -23,7 +23,7 @@ Cada posição de um caminho completo corresponde a um instante absoluto: a prim
 
 `Instance` garante que `agents[i].id == i`: os IDs são `0, 1, 2, ...`, seguindo a ordem dos agentes. Na construção manual, os IDs fornecidos são substituídos na cópia armazenada pela instância; `scenarioId` e as posições são preservados. O carregamento de arquivos `.scen` já segue essa convenção. Portanto, caminhos, reservas e conflitos usam a mesma identificação.
 
-`repairInitialPaths` passa as reservas preparadas diretamente para `UpdateSolutionConflictsV2`, por referência constante. Não há mapeamento de IDs nem cópia adicional das reservas para recalcular os conflitos. A cópia usada para preparar e eventualmente descartar o reparo continua existindo.
+`repairInitialPaths` passa as reservas diretamente para `UpdateSolutionConflictsV2`, por referência constante. Não há mapeamento de IDs nem cópia completa das reservas por reparo. As alterações são feitas no próprio estado, protegidas por um registro que permite desfazê-las.
 
 ## 2. Seleção do conflito e preparação das reservas
 
@@ -32,9 +32,11 @@ As estratégias disponíveis são:
 - `RESOLVE_BY_AGENT`: seleciona o primeiro registro do primeiro agente com conflitos, seguindo a ordem da instância.
 - `RESOLVE_BY_TIME`: compara os primeiros registros dos agentes e seleciona o que vem primeiro na ordenação temporal dos conflitos. Empates completos preservam a ordem da instância.
 
-Depois da seleção, o solver copia `result.reservations` e remove dessa cópia o caminho completo do agente ativo por meio de `repairSafeIntervalTable`. A remoção inclui suas visitas explícitas, sua contribuição aos bloqueios de arestas e sua reserva permanente de destino.
+Depois da seleção, o solver abre uma `ReservationTransaction` sobre `result.reservations`. Antes de remover o caminho completo do agente ativo, ela guarda as entradas originais dos intervalos seguros, ocupações explícitas, arestas e destino que essa remoção pode alterar. Somente essas entradas são copiadas para uso durante a tentativa; o restante do mapa permanece no lugar. A remoção inclui as visitas explícitas do agente, sua contribuição aos bloqueios de arestas e sua reserva permanente de destino.
 
-Todas as tentativas de ponte e o eventual fallback usam essa mesma tabela preparada. Os caminhos dos outros agentes permanecem fixos durante a tentativa. O estado confirmado só é substituído depois que o novo caminho, suas reservas e seus conflitos estiverem preparados.
+Todas as tentativas de ponte e o eventual fallback usam essa mesma tabela preparada. Os caminhos dos outros agentes permanecem fixos durante a tentativa. Antes de inserir o candidato, o registro é ampliado para incluir células, arestas e destino ainda não protegidos. Uma entrada compartilhada pelos caminhos antigo e novo é guardada apenas uma vez, com seu valor anterior ao reparo.
+
+Se a tentativa falhar ou uma operação lançar uma exceção, o registro remove as entradas provisórias e restaura os nós originais dos mapas. A restauração reutiliza os nós preservados, sem alocar memória; as tabelas não reduzem sua capacidade durante a transação. A confirmação ocorre depois de preparar o caminho e os conflitos. Nesse momento, apenas os valores antigos registrados são descartados, sem substituir ou liberar o estado completo das reservas.
 
 ## 3. Âncora, reconexão e busca da ponte
 
@@ -121,7 +123,7 @@ Não existe mais `continue_if_failed`, nem o conjunto `ignoredForRevision`. O so
 
 ## 6. Atualização incremental dos conflitos
 
-Depois de montar o candidato, `updateReservationState` insere seu caminho completo na cópia preparada das reservas. Somente então `UpdateSolutionConflictsV2` recebe o novo caminho, as reservas atualizadas e o conjunto anterior de conflitos.
+Depois de montar o candidato, a transação protege suas entradas e `updateReservationState` insere seu caminho completo nas reservas. Somente então `UpdateSolutionConflictsV2` recebe o novo caminho, as reservas atualizadas e o conjunto anterior de conflitos.
 
 ### 6.1. Onde começa a atualização
 
@@ -175,7 +177,7 @@ Essa etapa atualiza os registros de conflitos. Ela não modifica novamente os ca
 
 ## 7. Confirmação e próxima iteração
 
-Depois da atualização incremental, o solver registra a configuração aceita e publica juntos o novo caminho, os conflitos atualizados e as reservas preparadas. A próxima seleção utiliza esse novo estado.
+Depois da atualização incremental, o solver registra a configuração aceita, publica o novo caminho e os conflitos atualizados e confirma a transação das reservas. As operações que podem alocar memória precedem essa confirmação. A próxima seleção utiliza esse novo estado.
 
 O fluxo principal pode ser resumido pelo pseudocódigo:
 
@@ -185,17 +187,18 @@ registrar a configuração inicial
 
 enquanto houver um registro de conflito selecionável:
     escolher agente e conflito
-    copiar reservas e remover o caminho completo desse agente
+    iniciar registro das entradas afetadas e remover o caminho completo desse agente
 
     tentar pontes locais e concatenar prefixo + ponte + sufixo
     se não houver candidato utilizável:
         tentar SIPP completo com destino permanente
     se ainda não houver candidato utilizável:
+        restaurar as entradas originais das reservas
         retornar falha com o estado confirmado
 
-    inserir o novo caminho nas reservas preparadas
+    proteger as entradas adicionais e inserir o novo caminho nas reservas
     atualizar conflitos antigos e novos afetados pela alteração
-    registrar a configuração e publicar caminho, conflitos e reservas
+    registrar a configuração, publicar caminho e conflitos e confirmar as reservas
 
 finalizar o resultado com o estado corrente
 ```
