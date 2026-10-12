@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <queue>
+#include <span>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -52,20 +53,38 @@ namespace mapf {
         }
 
         // retorna o intervalo de tempo para uma celula em um instante de tempo
-        int findIntervalIndexAtTime(const SafeIntervalsByCell& safeIntervalsByCell, Cell* cell, int time) {
-            auto it = safeIntervalsByCell.find(cell);
-            if (it == safeIntervalsByCell.end()) {
-                return -1;
+        // Only the key participates in hashing. Search metadata can change in
+        // place without invalidating an unordered_set entry.
+        struct SearchState {
+            StateKey key;
+            mutable int bestG = SAFE_INTERVAL_INFINITY;
+            mutable ParentInfo parent {};
+            mutable bool closed = false;
+
+            bool operator==(const SearchState& other) const { return key == other.key; }
+        };
+
+        struct SearchStateHash {
+            std::size_t operator()(const SearchState& state) const {
+                return StateKeyHash{}(state.key);
             }
+        };
 
-            const std::vector<Interval>& intervals = it->second;
+        std::span<const Interval> intervalsForCell(const SafeIntervalsByCell& table, Cell* cell) {
+            static constexpr Interval unrestricted {0, SAFE_INTERVAL_INFINITY};
+            const auto entry = table.find(cell);
+            // An explicitly empty vector means blocked at every time.
+            return entry == table.end() ? std::span<const Interval>(&unrestricted, 1)
+                : std::span<const Interval>(entry->second);
+        }
 
-            for (int i = 0; i < static_cast<int>(intervals.size()); i++) {
+        int findIntervalIndexAtTime(const SafeIntervalsByCell& table, Cell* cell, int time) {
+            const auto intervals = intervalsForCell(table, cell);
+            for (std::size_t i = 0; i < intervals.size(); ++i) {
                 if (intervals[i].start <= time && time <= intervals[i].end) {
-                    return i;
+                    return static_cast<int>(i);
                 }
             }
-
             return -1;
         }
 
@@ -85,7 +104,7 @@ namespace mapf {
     }
 
     SafeIntervalTable AStarSippSolver::getSafeIntervalsByCell(
-        Grid& grid,
+        Grid&,
         const std::vector<std::list<Cell*>>& otherAgentPaths
     ) {
         std::unordered_map<Cell*, std::vector<Interval>> collisionIntervalsByCell;
@@ -115,12 +134,7 @@ namespace mapf {
             collisionIntervalsByCell[goalCell].push_back({lastTime, SAFE_INTERVAL_INFINITY});
         }
 
-        // TODO: é necessário isso? parece que reserva muito espaço pra nada
-        table.safeIntervalsByCell.reserve(grid.getCells().size());
-
-        for (Cell& cell : grid.getCells()) {
-            Cell* cellPtr = &cell;
-            std::vector<Interval> collisionIntervals = collisionIntervalsByCell[cellPtr];
+        for (auto& [cellPtr, collisionIntervals] : collisionIntervalsByCell) {
             mergeCollisionIntervals(collisionIntervals);
 
             std::vector<Interval> safeIntervals;
@@ -143,7 +157,7 @@ namespace mapf {
                 safeIntervals.push_back({currentStart, SAFE_INTERVAL_INFINITY});
             }
 
-            table.safeIntervalsByCell[cellPtr] = safeIntervals;
+            table.safeIntervalsByCell.emplace(cellPtr, std::move(safeIntervals));
         }
 
         return table;
@@ -226,9 +240,7 @@ namespace mapf {
         }
 
         std::priority_queue<SippNode, std::vector<SippNode>, CompareSippNode> openHeap;
-        std::unordered_map<StateKey, int, StateKeyHash> bestG;
-        std::unordered_map<StateKey, ParentInfo, StateKeyHash> cameFrom;
-        std::unordered_set<StateKey, StateKeyHash> closedSet;
+        std::unordered_set<SearchState, SearchStateHash> states;
 
         StateKey startKey {
             .cell = start,
@@ -245,31 +257,18 @@ namespace mapf {
             .f = startTime + startH
         });
 
-        bestG[startKey] = startTime;
-        cameFrom[startKey] = {
-            .parent = startKey,
-            .hasParent = false
-        };
+        states.insert({startKey, startTime, {startKey, false}, false});
 
         while (!openHeap.empty()) {
             SippNode current = openHeap.top();
             openHeap.pop();
 
-            auto currentBestG = bestG.find(current.key);
-            if (currentBestG == bestG.end() || current.g != currentBestG->second) {
+            const auto currentState = states.find({current.key});
+            if (currentState == states.end() || current.g != currentState->bestG || currentState->closed) {
                 continue;
             }
 
-            if (closedSet.contains(current.key)) {
-                continue;
-            }
-
-            const auto currentIntervalsIt = intervalTable.safeIntervalsByCell.find(current.key.cell);
-            if (currentIntervalsIt == intervalTable.safeIntervalsByCell.end()) {
-                continue;
-            }
-
-            const std::vector<Interval>& currentIntervals = currentIntervalsIt->second;
+            const auto currentIntervals = intervalsForCell(intervalTable.safeIntervalsByCell, current.key.cell);
             if (
                 current.key.intervalIndex < 0 ||
                 current.key.intervalIndex >= static_cast<int>(currentIntervals.size())
@@ -295,7 +294,7 @@ namespace mapf {
                 while (true) {
                     stateSequence.push_back(traceKey);
 
-                    ParentInfo parentInfo = cameFrom[traceKey];
+                    const ParentInfo& parentInfo = states.find({traceKey})->parent;
                     if (!parentInfo.hasParent) {
                         break;
                     }
@@ -312,8 +311,8 @@ namespace mapf {
                     StateKey parentKey = stateSequence[i - 1];
                     StateKey childKey = stateSequence[i];
 
-                    int parentTime = bestG[parentKey];
-                    int childTime = bestG[childKey];
+                    int parentTime = states.find({parentKey})->bestG;
+                    int childTime = states.find({childKey})->bestG;
 
                     for (int t = parentTime + 1; t < childTime; t++) {
                         path.push_back(parentKey.cell);
@@ -325,7 +324,7 @@ namespace mapf {
                 return path;
             }
 
-            closedSet.insert(current.key);
+            currentState->closed = true;
 
             const Interval& currentInterval = selectedInterval;
             std::list<Cell*> neighbors = grid.getNeighbors(current.key.cell);
@@ -335,12 +334,7 @@ namespace mapf {
                     continue;
                 }
 
-                const auto neighborIntervalsIt = intervalTable.safeIntervalsByCell.find(neighbor);
-                if (neighborIntervalsIt == intervalTable.safeIntervalsByCell.end()) {
-                    continue;
-                }
-
-                const std::vector<Interval>& neighborIntervals = neighborIntervalsIt->second;
+                const auto neighborIntervals = intervalsForCell(intervalTable.safeIntervalsByCell, neighbor);
 
                 for (int neighborIntervalIndex = 0; neighborIntervalIndex < static_cast<int>(neighborIntervals.size()); neighborIntervalIndex++) {
                     const Interval& neighborInterval = neighborIntervals[neighborIntervalIndex];
@@ -373,9 +367,9 @@ namespace mapf {
                         .intervalIndex = neighborIntervalIndex
                     };
 
-                    auto neighborBestG = bestG.find(neighborKey);
-                    bool wasNotDiscovered = neighborBestG == bestG.end();
-                    bool betterPathFound = !wasNotDiscovered && earliestArrivalTime < neighborBestG->second;
+                    auto neighborState = states.find({neighborKey});
+                    bool wasNotDiscovered = neighborState == states.end();
+                    bool betterPathFound = !wasNotDiscovered && earliestArrivalTime < neighborState->bestG;
 
                     if (!wasNotDiscovered && !betterPathFound) {
                         continue;
@@ -391,11 +385,12 @@ namespace mapf {
                         .f = earliestArrivalTime + neighborH
                     });
 
-                    bestG[neighborKey] = earliestArrivalTime;
-                    cameFrom[neighborKey] = {
-                        .parent = current.key,
-                        .hasParent = true
-                    };
+                    if (wasNotDiscovered) {
+                        states.insert({neighborKey, earliestArrivalTime, {current.key, true}, false});
+                    } else {
+                        neighborState->bestG = earliestArrivalTime;
+                        neighborState->parent = {current.key, true};
+                    }
                 }
             }
         }

@@ -45,7 +45,7 @@ struct PathReservationState {
 | --- | --- |
 | `vertex_agents[cell][t]` | IDs dos agentes que ocupam explicitamente a célula no instante `t`, incluindo a última posição do caminho. |
 | `goal_reservations[cell]` | Proprietário e instante de início da ocupação permanente do destino. |
-| `safeIntervalTable.safeIntervalsByCell[cell]` | Complemento normalizado da união das ocupações explícitas e permanentes. |
+| `safeIntervalTable.safeIntervalsByCell[cell]` | Complemento normalizado das ocupações da célula. Ausência significa `[0, infinito]`; vetor vazio significa bloqueio total. |
 | `safeIntervalTable.blockedEdgeArrivals[{V,U}]` | Instantes de chegada dos movimentos `U -> V` que impedem uma troca na direção inversa. |
 
 Esses quatro componentes devem permanecer consistentes. Se X e Y ocupam `A` em `5`, excluir X altera o conjunto de proprietários, mas mantém o bloqueio de `A@5`.
@@ -130,7 +130,11 @@ Adicionar o novo caminho diretamente ao estado original deixaria reservas obsole
 
 Atualizar apenas a janela geométrica também é insuficiente: inserir duas esperas desloca em dois instantes toda a cauda posterior, inclusive sua chegada ao destino. A remoção e inserção dos caminhos completos cobrem as células antigas, as novas e esses deslocamentos.
 
-Durante a tentativa local, `result.reservations` contém alterações provisórias protegidas por `ReservationTransaction`. Cada entrada afetada é registrada uma única vez; os nós originais são preservados e a tentativa trabalha sobre cópias apenas de seus valores. Rejeição, falha no fallback ou exceções removem as entradas provisórias e reinserem os nós originais sem alocação. Os mapas mantêm capacidade para o tamanho anterior. A restauração explícita precede o retorno por falha, e a confirmação ocorre depois das operações que podem alocar memória. Erros de contrato, como proprietário incorreto, segunda remoção ou destino já reservado, continuam sendo detectados.
+Durante a tentativa local, `result.reservations` contém alterações provisórias protegidas por `ReservationTransaction`. O registro guarda alterações individuais de célula, instante e agente, tempos de aresta, destinos e vetores de intervalos substituídos. Os nós removidos são extraídos, sem copiar as outras reservas da célula. Contêineres pais vazios também são preservados como nós. Rejeição, falha no fallback ou exceções desfazem as operações na ordem inversa, restaurando pais antes dos filhos sem alocação. A restauração explícita precede o retorno por falha, e a confirmação ocorre depois das operações que podem alocar memória. Erros de contrato, como proprietário incorreto, segunda remoção ou destino já reservado, continuam sendo detectados.
+
+`UpdateSolutionConflictsV2` recebe `SolutionConflicts&` e retorna `void`: atualiza os eventos e registros afetados no próprio objeto. Se uma alocação falhar durante essa atualização, o chamador deve descartar o estado de conflitos parcialmente alterado; o solver propaga a exceção e descarta seu resultado local.
+
+A tabela de intervalos é esparsa: somente células com reservas possuem entradas. Ao remover a última reserva de uma célula, sua entrada é excluída. SIPP interpreta células ausentes como livres em `[0, SAFE_INTERVAL_INFINITY]`, mantém vetores vazios como bloqueio total e continua rejeitando obstáculos do grid. Custo, pai e fechamento de cada estado SIPP ficam reunidos em uma entrada de `unordered_set`.
 
 No `FullPathRepairIterativeSolver`, a mesma transação de reservas abrange todos os participantes do conflito. Todos os caminhos antigos do grupo são removidos antes da primeira busca. Cada substituição aceita é inserida nas reservas antes da busca seguinte, e `PathTransaction` instala o novo caminho guardando o antigo sem copiar seus nós. A validação global lê esses caminhos provisórios. Se qualquer participante ou a validação falhar, ambas as transações são desfeitas antes do cálculo das métricas e do retorno. A confirmação ocorre somente quando o grupo inteiro é válido.
 
@@ -179,17 +183,17 @@ O construtor completo permanece como referência de equivalência. `SolutionConf
 
 ## 8. Custos e limites do ganho esperado
 
-Se `V` é o número de células, `L` a soma dos comprimentos dos caminhos e `b_c` o número de bloqueios brutos da célula `c`, uma construção completa custa aproximadamente:
+Se `L` é a soma dos comprimentos dos caminhos e `b_c` o número de bloqueios brutos da célula `c`, uma construção completa custa aproximadamente:
 
 ```text
-O(V + L + soma_c(b_c log b_c))
+O(L + soma_c(b_c log b_c))
 ```
 
-Essa estimativa considera custos esperados dos mapas hash. A abordagem incremental mantém uma construção inicial e troca as reconstruções seguintes por operações locais. O registro para restauração copia somente os valores das entradas afetadas: vetores de intervalos, ocupações temporais das células, conjuntos de tempos das arestas e reservas de destino. Seu custo depende dessas entradas, incluindo reservas de outros agentes que compartilham as mesmas células ou arestas, sem percorrer o estado completo a cada tentativa.
+Essa estimativa considera custos esperados dos mapas hash. A construção percorre apenas células usadas pelos caminhos. A abordagem incremental mantém uma construção inicial e troca as reconstruções seguintes por operações locais. O registro para restauração transfere nós removidos e vetores de intervalos substituídos; seu tamanho acompanha as alterações, sem copiar ocupações temporais ou agentes que não foram modificados na mesma célula.
 
 A remoção/inserção percorre o caminho enviado, reúne suas células distintas e consulta as ocupações restantes dessas células e dos extremos dos movimentos afetados. Portanto, seu custo não é somente `O(tamanho do caminho)`: células disputadas podem conter muitas visitas a ordenar, e conjuntos de agentes precisam ser consultados para preservar arestas compartilhadas.
 
-Espera-se reduzir trabalho quando cada reparo afeta poucas células em relação ao mapa. Entretanto, os conjuntos temporais aumentam memória e custo de registro; regiões muito disputadas reduzem a vantagem. Buscas SIPP, cópias de candidatos, cálculo de impressões digitais e atualização de conflitos continuam consumindo tempo. Menos células recalculadas não garante uma redução proporcional no tempo total.
+Espera-se reduzir trabalho quando cada reparo afeta poucas células em relação ao mapa. Entretanto, os conjuntos temporais aumentam memória e custo de registro; regiões muito disputadas reduzem a vantagem. Buscas SIPP, cópias de candidatos e atualização de conflitos continuam consumindo tempo. O reparo local não mantém mais impressões digitais nem histórico de configurações. O detector inicial processa um instante por vez e armazena eventos somente quando há conflito. Menos células recalculadas não garante uma redução proporcional no tempo total.
 
 ## 9. Validação da correção e do desempenho
 

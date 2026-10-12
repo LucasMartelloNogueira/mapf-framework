@@ -7,62 +7,95 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace mapf::solver_utils {
     namespace {
-        // Keep the original nodes so rollback can restore erased entries without
-        // allocating. Only entries touched by the old or replacement path are copied.
-        template<class Map>
-        class ReservationMapUndo {
+        // Each entry owns only the removed node, never a copy of its value.
+        // Parent containers are extracted only after becoming empty. Reverse
+        // replay restores those parents before their child nodes, without allocation.
+        template<class Container>
+        struct ReservationUndoEntry {
+            Container* target;
+            typename Container::key_type key;
+            typename Container::node_type original;
+
+            void rollback() noexcept {
+                target->erase(key);
+                if (!original.empty()) target->insert(std::move(original));
+            }
+        };
+
+        class ReservationUndoLog {
+            using Entry = std::variant<
+                ReservationUndoEntry<std::unordered_set<int>>,
+                ReservationUndoEntry<VertexOccupants::mapped_type>,
+                ReservationUndoEntry<VertexOccupants>,
+                ReservationUndoEntry<BlockedEdgeArrivals>,
+                ReservationUndoEntry<decltype(PathReservationState::goal_reservations)>,
+                ReservationUndoEntry<SafeIntervalsByCell>>;
+            std::vector<Entry> entries;
+            bool active = true;
+
         public:
-            explicit ReservationMapUndo(Map& target) : target(target) {}
-            ReservationMapUndo(const ReservationMapUndo&) = delete;
-            ReservationMapUndo& operator=(const ReservationMapUndo&) = delete;
+            ~ReservationUndoLog() { rollback(); }
 
-            ~ReservationMapUndo() { rollback(); }
-
-            void remember(const typename Map::key_type& key) {
-                auto [saved, inserted] = originals.try_emplace(key);
-                if (!inserted) {
-                    return;
-                }
-                const auto entry = target.find(key);
-                if (entry != target.end()) {
-                    // Record ownership before copying: even a failed allocation
-                    // leaves the original entry available for rollback.
-                    saved->second = target.extract(entry);
-                    target.emplace(saved->second.key(), saved->second.mapped());
-                }
-                // An empty saved node records that this key did not exist.
+            template<class Container>
+            void extract(Container& target, const typename Container::key_type& key) {
+                // Allocate the undo entry before touching the target. Rehashing
+                // does not invalidate references to mapped containers.
+                auto& entry = entries.emplace_back(ReservationUndoEntry<Container>{&target, key, {}});
+                std::get<ReservationUndoEntry<Container>>(entry).original = target.extract(key);
             }
 
             void rollback() noexcept {
-                if (!active) {
-                    return;
-                }
-                // Erase ALL tentative entries before restoring any originals.
-                // The maps never shrink/rehash explicitly during a transaction,
-                // so their buckets still fit the original size. Node insertion
-                // needs no allocation; these pointer/edge hashers do not throw.
-                for (const auto& [key, original] : originals) {
-                    target.erase(key);
-                }
-                for (auto& [key, original] : originals) {
-                    if (!original.empty()) {
-                        target.insert(std::move(original));
-                    }
+                if (!active) return;
+                for (auto it = entries.rbegin(); it != entries.rend(); ++it) {
+                    std::visit([](auto& entry) { entry.rollback(); }, *it);
                 }
                 active = false;
             }
 
             void commit() noexcept { active = false; }
+        };
 
-        private:
-            Map& target;
-            std::unordered_map<typename Map::key_type, typename Map::node_type,
-                typename Map::hasher, typename Map::key_equal> originals;
-            bool active = true;
+        class ReservationEditor {
+            ReservationUndoLog* undo;
+
+        public:
+            explicit ReservationEditor(ReservationUndoLog* undo) : undo(undo) {}
+
+            template<class Map>
+            typename Map::mapped_type& ensure(Map& target, const typename Map::key_type& key) {
+                const auto found = target.find(key);
+                if (found != target.end()) return found->second;
+                if (undo) undo->extract(target, key);
+                return target.try_emplace(key).first->second;
+            }
+
+            void insert(std::unordered_set<int>& target, int value) {
+                if (target.contains(value)) return;
+                if (undo) undo->extract(target, value);
+                target.insert(value);
+            }
+
+            template<class Container>
+            void erase(Container& target, const typename Container::key_type& key) {
+                if (!target.contains(key)) return;
+                if (undo) undo->extract(target, key);
+                else target.erase(key);
+            }
+
+            template<class Map>
+            void replace(Map& target, const typename Map::key_type& key, typename Map::mapped_type value) {
+                if (undo) {
+                    undo->extract(target, key);
+                    target.emplace(key, std::move(value));
+                } else {
+                    target.insert_or_assign(key, std::move(value));
+                }
+            }
         };
 
         int pathCost(const std::list<Cell*>& path) {
@@ -148,28 +181,31 @@ namespace mapf::solver_utils {
         }
 
         void registerPathReservations(
-            PathReservationState& state, const std::list<Cell*>& path, int agentId
+            PathReservationState& state, const std::list<Cell*>& path, int agentId,
+            ReservationUndoLog* undo = nullptr
         ) {
             if (path.empty()) {
                 return;
             }
-            if (!state.goal_reservations.emplace(path.back(), GoalReservation{
-                    agentId, static_cast<int>(path.size()) - 1}).second) {
+            if (state.goal_reservations.contains(path.back())) {
                 throw std::logic_error("The path's destination is already reserved.");
             }
+            ReservationEditor edit(undo);
+            edit.replace(state.goal_reservations, path.back(), {agentId, static_cast<int>(path.size()) - 1});
             Cell* previous = nullptr;
             int time = 0;
             for (Cell* cell : path) {
-                state.vertex_agents[cell][time].insert(agentId);
+                auto& times = edit.ensure(state.vertex_agents, cell);
+                edit.insert(edit.ensure(times, time), agentId);
                 if (previous != nullptr && previous != cell) {
-                    state.safeIntervalTable.blockedEdgeArrivals[{cell, previous}].insert(time);
+                    edit.insert(edit.ensure(state.safeIntervalTable.blockedEdgeArrivals, {cell, previous}), time);
                 }
                 previous = cell;
                 ++time;
             }
         }
 
-        void rebuildCellSafeIntervals(PathReservationState& state, Cell* cell) {
+        void rebuildCellSafeIntervals(PathReservationState& state, Cell* cell, ReservationUndoLog* undo = nullptr) {
             std::vector<Interval> blockedIntervals;
             const auto vertex = state.vertex_agents.find(cell);
             if (vertex != state.vertex_agents.end()) {
@@ -183,6 +219,11 @@ namespace mapf::solver_utils {
             const auto goal = state.goal_reservations.find(cell);
             if (goal != state.goal_reservations.end()) {
                 blockedIntervals.push_back({goal->second.arrivalTime, SAFE_INTERVAL_INFINITY});
+            }
+            ReservationEditor edit(undo);
+            if (blockedIntervals.empty()) {
+                edit.erase(state.safeIntervalTable.safeIntervalsByCell, cell);
+                return;
             }
             mergeBlockedIntervals(blockedIntervals);
 
@@ -201,7 +242,7 @@ namespace mapf::solver_utils {
             if (safeStart < SAFE_INTERVAL_INFINITY) {
                 safeIntervals.push_back({safeStart, SAFE_INTERVAL_INFINITY});
             }
-            state.safeIntervalTable.safeIntervalsByCell.insert_or_assign(cell, std::move(safeIntervals));
+            edit.replace(state.safeIntervalTable.safeIntervalsByCell, cell, std::move(safeIntervals));
         }
 
         double calculateInjustice(
@@ -241,58 +282,27 @@ namespace mapf::solver_utils {
         }
     }
 
+    namespace {
+        void removePathReservations(PathReservationState& state, const std::list<Cell*>& path,
+            int agentId, ReservationUndoLog* undo);
+        void insertPathReservations(PathReservationState& state, const std::list<Cell*>& path,
+            int agentId, ReservationUndoLog* undo);
+    }
+
     struct ReservationTransaction::Impl {
-    public:
-        explicit Impl(PathReservationState& state) :
-            state(state), intervals(state.safeIntervalTable.safeIntervalsByCell),
-            vertices(state.vertex_agents), edges(state.safeIntervalTable.blockedEdgeArrivals),
-            goals(state.goal_reservations) {}
+        explicit Impl(PathReservationState& state) : state(state) {}
 
         void removePath(const std::list<Cell*>& path, int agentId) {
-            rememberPath(path);
-            repairSafeIntervalTable(state, path, agentId);
+            removePathReservations(state, path, agentId, &undo);
         }
-
         void insertPath(const std::list<Cell*>& path, int agentId) {
-            rememberPath(path);
-            updateReservationState(state, path, agentId);
+            insertPathReservations(state, path, agentId, &undo);
         }
-
-        void rollback() noexcept {
-            intervals.rollback();
-            vertices.rollback();
-            edges.rollback();
-            goals.rollback();
-        }
-
-        void commit() noexcept {
-            intervals.commit();
-            vertices.commit();
-            edges.commit();
-            goals.commit();
-        }
-
-    private:
-        void rememberPath(const std::list<Cell*>& path) {
-            Cell* previous = nullptr;
-            for (Cell* cell : path) {
-                intervals.remember(cell);
-                vertices.remember(cell);
-                if (previous != nullptr && previous != cell) {
-                    edges.remember({cell, previous});
-                }
-                previous = cell;
-            }
-            if (!path.empty()) {
-                goals.remember(path.back());
-            }
-        }
+        void rollback() noexcept { undo.rollback(); }
+        void commit() noexcept { undo.commit(); }
 
         PathReservationState& state;
-        ReservationMapUndo<SafeIntervalsByCell> intervals;
-        ReservationMapUndo<VertexOccupants> vertices;
-        ReservationMapUndo<BlockedEdgeArrivals> edges;
-        ReservationMapUndo<decltype(PathReservationState::goal_reservations)> goals;
+        ReservationUndoLog undo;
     };
 
     ReservationTransaction::ReservationTransaction(PathReservationState& state) :
@@ -391,7 +401,7 @@ namespace mapf::solver_utils {
     }
 
     PathReservationState buildReservationState(
-        Grid& grid,
+        Grid&,
         const std::vector<Agent>& agents,
         const std::vector<std::list<Cell*>>& paths,
         std::optional<std::size_t> excludedPathIndex
@@ -407,99 +417,109 @@ namespace mapf::solver_utils {
             validateReservationPath(paths[i]);
             registerPathReservations(state, paths[i], agents[i].id);
         }
-        state.safeIntervalTable.safeIntervalsByCell.reserve(grid.getCells().size());
-        for (Cell& cell : grid.getCells()) {
-            rebuildCellSafeIntervals(state, &cell);
+        for (const auto& [cell, occupants] : state.vertex_agents) {
+            rebuildCellSafeIntervals(state, cell);
         }
         return state;
     }
 
-    void repairSafeIntervalTable(
-        PathReservationState& state, const std::list<Cell*>& oldPath, int agentId
-    ) {
-        validateReservationPath(oldPath);
-        if (oldPath.empty()) {
-            return;
-        }
-        const auto goal = state.goal_reservations.find(oldPath.back());
-        if (goal == state.goal_reservations.end() || goal->second.agentId != agentId ||
-            goal->second.arrivalTime != static_cast<int>(oldPath.size()) - 1) {
-            throw std::logic_error("The path's goal reservation does not match its owner and arrival.");
-        }
-        // Validate every membership before changing any entry. The caller must
-        // protect later mutations with an undo log or a disposable state copy.
-        std::unordered_set<Cell*> affectedCells;
-        int time = 0;
-        for (Cell* cell : oldPath) {
-            const auto* occupants = occupantsAt(state.vertex_agents, cell, time);
-            if (occupants == nullptr || !occupants->contains(agentId)) {
-                throw std::logic_error("The path's explicit reservation is missing its owner.");
+    namespace {
+        void removePathReservations(
+            PathReservationState& state, const std::list<Cell*>& oldPath, int agentId, ReservationUndoLog* undo
+        ) {
+            validateReservationPath(oldPath);
+            if (oldPath.empty()) {
+                return;
             }
-            affectedCells.insert(cell);
-            ++time;
-        }
-        time = 0;
-        for (Cell* cell : oldPath) {
-            const auto vertex = state.vertex_agents.find(cell);
-            const auto occupants = vertex->second.find(time);
-            occupants->second.erase(agentId);
-            if (occupants->second.empty()) {
-                vertex->second.erase(occupants);
+            const auto goal = state.goal_reservations.find(oldPath.back());
+            if (goal == state.goal_reservations.end() || goal->second.agentId != agentId ||
+                goal->second.arrivalTime != static_cast<int>(oldPath.size()) - 1) {
+                throw std::logic_error("The path's goal reservation does not match its owner and arrival.");
             }
-            if (vertex->second.empty()) {
-                state.vertex_agents.erase(vertex);
+            // Validate every membership before changing any entry. The caller must
+            // protect later mutations with an undo log or a disposable state copy.
+            std::unordered_set<Cell*> affectedCells;
+            int time = 0;
+            for (Cell* cell : oldPath) {
+                const auto* occupants = occupantsAt(state.vertex_agents, cell, time);
+                if (occupants == nullptr || !occupants->contains(agentId)) {
+                    throw std::logic_error("The path's explicit reservation is missing its owner.");
+                }
+                affectedCells.insert(cell);
+                ++time;
             }
-            ++time;
-        }
-        state.goal_reservations.erase(goal);
+            ReservationEditor edit(undo);
+            time = 0;
+            for (Cell* cell : oldPath) {
+                const auto vertex = state.vertex_agents.find(cell);
+                const auto occupants = vertex->second.find(time);
+                edit.erase(occupants->second, agentId);
+                if (occupants->second.empty()) {
+                    edit.erase(vertex->second, time);
+                }
+                if (vertex->second.empty()) {
+                    edit.erase(state.vertex_agents, cell);
+                }
+                ++time;
+            }
+            edit.erase(state.goal_reservations, oldPath.back());
 
-        // Endpoint intersections must see the state AFTER all explicit removals.
-        Cell* previous = nullptr;
-        time = 0;
-        auto& blockedEdges = state.safeIntervalTable.blockedEdgeArrivals;
-        for (Cell* cell : oldPath) {
-            if (previous != nullptr && previous != cell &&
-                !hasRemainingMovement(state.vertex_agents, previous, cell, time)) {
-                const auto edge = blockedEdges.find({cell, previous});
-                if (edge != blockedEdges.end()) {
-                    edge->second.erase(time);
-                    if (edge->second.empty()) {
-                        blockedEdges.erase(edge);
+            // Endpoint intersections must see the state AFTER all explicit removals.
+            Cell* previous = nullptr;
+            time = 0;
+            auto& blockedEdges = state.safeIntervalTable.blockedEdgeArrivals;
+            for (Cell* cell : oldPath) {
+                if (previous != nullptr && previous != cell &&
+                    !hasRemainingMovement(state.vertex_agents, previous, cell, time)) {
+                    const auto edge = blockedEdges.find({cell, previous});
+                    if (edge != blockedEdges.end()) {
+                        edit.erase(edge->second, time);
+                        if (edge->second.empty()) {
+                            edit.erase(blockedEdges, EdgeKey{cell, previous});
+                        }
                     }
                 }
+                previous = cell;
+                ++time;
             }
-            previous = cell;
-            ++time;
+            for (Cell* cell : affectedCells) {
+                rebuildCellSafeIntervals(state, cell, undo);
+            }
         }
-        for (Cell* cell : affectedCells) {
-            rebuildCellSafeIntervals(state, cell);
+
+        void insertPathReservations(
+            PathReservationState& state, const std::list<Cell*>& newPath, int agentId, ReservationUndoLog* undo
+        ) {
+            validateReservationPath(newPath);
+            if (newPath.empty()) {
+                return;
+            }
+            if (state.goal_reservations.contains(newPath.back())) {
+                throw std::logic_error("The path's destination is already reserved.");
+            }
+            std::unordered_set<Cell*> affectedCells;
+            int time = 0;
+            for (Cell* cell : newPath) {
+                const auto* occupants = occupantsAt(state.vertex_agents, cell, time);
+                if (occupants != nullptr && occupants->contains(agentId)) {
+                    throw std::logic_error("Remove the agent's old path before registering its replacement.");
+                }
+                affectedCells.insert(cell);
+                ++time;
+            }
+            registerPathReservations(state, newPath, agentId, undo);
+            for (Cell* cell : affectedCells) {
+                rebuildCellSafeIntervals(state, cell, undo);
+            }
         }
     }
 
-    void updateReservationState(
-        PathReservationState& state, const std::list<Cell*>& newPath, int agentId
-    ) {
-        validateReservationPath(newPath);
-        if (newPath.empty()) {
-            return;
-        }
-        if (state.goal_reservations.contains(newPath.back())) {
-            throw std::logic_error("The path's destination is already reserved.");
-        }
-        std::unordered_set<Cell*> affectedCells;
-        int time = 0;
-        for (Cell* cell : newPath) {
-            const auto* occupants = occupantsAt(state.vertex_agents, cell, time);
-            if (occupants != nullptr && occupants->contains(agentId)) {
-                throw std::logic_error("Remove the agent's old path before registering its replacement.");
-            }
-            affectedCells.insert(cell);
-            ++time;
-        }
-        registerPathReservations(state, newPath, agentId);
-        for (Cell* cell : affectedCells) {
-            rebuildCellSafeIntervals(state, cell);
-        }
+    void repairSafeIntervalTable(PathReservationState& state, const std::list<Cell*>& path, int agentId) {
+        removePathReservations(state, path, agentId, nullptr);
+    }
+
+    void updateReservationState(PathReservationState& state, const std::list<Cell*>& path, int agentId) {
+        insertPathReservations(state, path, agentId, nullptr);
     }
 
 }

@@ -30,8 +30,10 @@ namespace mapf::solver_utils {
         PathReservationState& state, const std::list<Cell*>& newPath, int agentId
     );
 
-    // One transaction may cover several agents. Only touched entries are saved.
-    // Failure/exception restores original map nodes without allocation.
+    // One transaction may cover several agents. Log individual cell/time/agent
+    // memberships, edge times, goals and replaced interval vectors, without
+    // copying other reservations in the same cell. Failure/exception replays
+    // original nodes in reverse order without allocation.
     // Explicitly rollback before returning a result that owns the state.
     class ReservationTransaction {
     public:

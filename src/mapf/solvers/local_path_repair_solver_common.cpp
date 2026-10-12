@@ -9,9 +9,7 @@
 #include <cstdlib>
 #include <variant>
 #include <optional>
-#include <sstream>
 #include <stdexcept>
-#include <string>
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
@@ -54,23 +52,6 @@ namespace mapf {
                 previous = cell;
             }
             return true;
-        }
-
-        std::string configurationFingerprint(
-            const std::vector<std::list<Cell*>>& paths,
-            std::size_t replacedIndex,
-            const std::list<Cell*>& replacement
-        ) {
-            std::ostringstream output;
-            for (std::size_t i = 0; i < paths.size(); ++i) {
-                const auto& path = i == replacedIndex ? replacement : paths[i];
-                output << path.size() << ':';
-                for (Cell* cell : path) {
-                    output << cell->position.x << ',' << cell->position.y << ';';
-                }
-                output << '|';
-            }
-            return output.str();
         }
 
         std::optional<SelectedConflict> selectByAgent(const SolutionConflicts& conflicts) {
@@ -144,8 +125,6 @@ namespace mapf {
         result.reservations = solver_utils::buildReservationState(grid, agents, result.paths);
 
         AStarSippSolver sipp;
-        std::unordered_set<std::string> visitedConfigurations;
-        visitedConfigurations.insert(configurationFingerprint(result.paths, result.paths.size(), {}));
 
         while (true) {
             std::optional<SelectedConflict> selected;
@@ -169,7 +148,6 @@ namespace mapf {
             repair.removePath(result.paths[activeIndex], agents[activeIndex].id);
 
             std::list<Cell*> newPath;
-            std::string nextConfiguration;
             bool repairSuccess = false;
             int repairStartIndex = 0;
             const int time = conflictTime(selected->conflict);
@@ -201,10 +179,6 @@ namespace mapf {
                         if (!structurallyValid(newPath, oldPath.front(), oldPath.back())) {
                             continue;
                         }
-                        nextConfiguration = configurationFingerprint(result.paths, activeIndex, newPath);
-                        if (visitedConfigurations.contains(nextConfiguration)) {
-                            continue;
-                        }
                         repairStartIndex = static_cast<int>(anchor);
                         repairSuccess = true;
                         break;
@@ -216,8 +190,7 @@ namespace mapf {
                 newPath = sipp.solve(grid, oldPath.front(), oldPath.back(),
                     result.reservations.safeIntervalTable, 0, AStarSippSolver::GoalOccupation::Permanent);
                 if (structurallyValid(newPath, oldPath.front(), oldPath.back())) {
-                    nextConfiguration = configurationFingerprint(result.paths, activeIndex, newPath);
-                    repairSuccess = !visitedConfigurations.contains(nextConfiguration);
+                    repairSuccess = true;
                     repairStartIndex = 0;
                 }
             }
@@ -231,16 +204,13 @@ namespace mapf {
 
             repair.insertPath(newPath, agents[activeIndex].id);
 
-            SolutionConflicts updatedConflicts = UpdateSolutionConflictsV2(
+            UpdateSolutionConflictsV2(
                 newPath, result.reservations, result.remainingConflicts,
                 static_cast<int>(activeIndex), repairStartIndex);
-            visitedConfigurations.insert(std::move(nextConfiguration));
             // All allocating work finished. Publishing cannot leave paths and
             // reservations inconsistent if an earlier operation throws.
             static_assert(std::is_nothrow_move_assignable_v<decltype(newPath)>);
-            static_assert(std::is_nothrow_move_assignable_v<SolutionConflicts>);
             result.paths[activeIndex] = std::move(newPath);
-            result.remainingConflicts = std::move(updatedConflicts);
             repair.commit();
         }
 

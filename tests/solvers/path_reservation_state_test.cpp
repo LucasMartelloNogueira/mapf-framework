@@ -7,12 +7,30 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <initializer_list>
+#include <new>
 #include <random>
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
+
+namespace allocation_test {
+    thread_local int remaining = -1;
+}
+
+void* operator new(std::size_t size) {
+    if (allocation_test::remaining == 0) throw std::bad_alloc();
+    if (allocation_test::remaining > 0) --allocation_test::remaining;
+    if (void* memory = std::malloc(size == 0 ? 1 : size)) return memory;
+    throw std::bad_alloc();
+}
+void* operator new[](std::size_t size) { return ::operator new(size); }
+void operator delete(void* memory) noexcept { std::free(memory); }
+void operator delete[](void* memory) noexcept { std::free(memory); }
+void operator delete(void* memory, std::size_t) noexcept { std::free(memory); }
+void operator delete[](void* memory, std::size_t) noexcept { std::free(memory); }
 
 namespace {
     using namespace mapf;
@@ -31,7 +49,10 @@ namespace {
 
     void requireIntervals(const PathReservationState& state, Cell* cell,
         std::initializer_list<Interval> expected) {
-        requireTest(sameIntervals(state.safeIntervalTable.safeIntervalsByCell.at(cell), expected),
+        const auto found = state.safeIntervalTable.safeIntervalsByCell.find(cell);
+        const std::vector<Interval> unrestricted {{0, SAFE_INTERVAL_INFINITY}};
+        requireTest(sameIntervals(found == state.safeIntervalTable.safeIntervalsByCell.end()
+            ? unrestricted : found->second, expected),
             "Unexpected safe interval endpoints.");
     }
 
@@ -73,7 +94,10 @@ namespace {
             horizon = std::max(horizon, path.size());
         }
         for (Cell& cell : grid.getCells()) {
-            const auto& intervals = state.safeIntervalTable.safeIntervalsByCell.at(&cell);
+            const auto found = state.safeIntervalTable.safeIntervalsByCell.find(&cell);
+            const std::vector<Interval> unrestricted {{0, SAFE_INTERVAL_INFINITY}};
+            const auto& intervals = found == state.safeIntervalTable.safeIntervalsByCell.end()
+                ? unrestricted : found->second;
             for (std::size_t t = 0; t <= horizon + 1; ++t) {
                 bool occupied = false;
                 for (const auto& path : indexed) {
@@ -134,6 +158,69 @@ int main() {
     using mapf::local_path_repair_detail::repairInitialPaths;
     constexpr int infinity = SAFE_INTERVAL_INFINITY;
 
+    // Transactions preserve unrelated occupants in a shared cell/time without
+    // copying their containers, and restore nested nodes after group replacement.
+    {
+        Grid grid(3, 4);
+        auto cell = [&](int x, int y) { return grid.getCellPtr(x, y); };
+        auto* a = cell(1, 1);
+        auto* b = cell(2, 1);
+        const Paths paths {{cell(0, 1), a, b, cell(3, 1)},
+            {cell(1, 0), a, b, cell(2, 2)}};
+        const Paths replacements {{cell(0, 1), cell(0, 1), a, b, cell(3, 1)},
+            {cell(1, 0), cell(1, 0), a, b, cell(2, 2)}};
+        const std::vector<Agent> agents {
+            agent(10, paths[0].front(), paths[0].back()),
+            agent(42, paths[1].front(), paths[1].back())};
+        const auto original = buildReservationState(grid, agents, paths);
+        auto state = original;
+        const auto* shared = &state.vertex_agents.at(a).at(1);
+        const int* outsider = &*shared->find(42);
+        {
+            ReservationTransaction transaction(state);
+            transaction.removePath(paths[0], 10);
+            requireTest(&state.vertex_agents.at(a).at(1) == shared &&
+                &*state.vertex_agents.at(a).at(1).find(42) == outsider,
+                "Transaction copied an unrelated occupant or its time entry.");
+            requireSameState(state, buildReservationState(grid, agents, paths, 0));
+            transaction.insertPath(replacements[0], 10);
+            requireTest(&state.vertex_agents.at(a).at(1) == shared,
+                "Insertion copied other times of the same cell.");
+        }
+        requireSameState(state, original);
+
+        // Fail each allocation in turn. Rollback runs while allocations remain
+        // disabled, so a hidden allocation during unwinding also fails the test.
+        bool completed = false;
+        for (int failure = 0; failure < 2000; ++failure) {
+            state = original;
+            allocation_test::remaining = failure;
+            try {
+                ReservationTransaction transaction(state);
+                transaction.removePath(paths[0], 10);
+                transaction.removePath(paths[1], 42);
+                transaction.insertPath(replacements[0], 10);
+                transaction.insertPath(replacements[1], 42);
+                completed = true;
+            } catch (const std::bad_alloc&) {
+            }
+            allocation_test::remaining = -1;
+            requireSameState(state, original);
+            if (completed) break;
+        }
+        requireTest(completed, "Allocation-failure sweep never completed the transaction.");
+        {
+            ReservationTransaction transaction(state);
+            transaction.removePath(paths[0], 10);
+            transaction.removePath(paths[1], 42);
+            transaction.insertPath(replacements[0], 10);
+            transaction.insertPath(replacements[1], 42);
+            transaction.commit();
+        }
+        requireSameState(state, buildReservationState(grid, agents, replacements));
+        requireOccupancyMatchesPaths(grid, state, replacements);
+    }
+
     // Shared vertices/movements survive one removal; reverse direction is independent.
     {
         Grid grid(3, 4);
@@ -148,7 +235,7 @@ int main() {
         const auto committed = buildReservationState(grid, agents, paths);
         auto state = committed;
         auto* untouched = grid.getCellPtr(0, 2);
-        const auto* untouchedStorage = state.safeIntervalTable.safeIntervalsByCell.at(untouched).data();
+        requireTest(!state.safeIntervalTable.safeIntervalsByCell.contains(untouched), "Unused cell was materialized.");
         repairSafeIntervalTable(state, paths[0], 10);
         requireSameState(state, buildReservationState(grid, agents, paths, 0));
         requireTest(state.vertex_agents.at(a).at(1) == std::unordered_set<int>{42}, "Removed the remaining occupant.");
@@ -164,8 +251,7 @@ int main() {
         updateReservationState(state, paths[0], 10);
         updateReservationState(state, paths[1], 42);
         requireSameState(state, committed);
-        requireTest(untouchedStorage == state.safeIntervalTable.safeIntervalsByCell.at(untouched).data(),
-            "An unrelated cell's interval storage was replaced.");
+        requireTest(!state.safeIntervalTable.safeIntervalsByCell.contains(untouched), "Unused cell was materialized by an update.");
         requireOccupancyMatchesPaths(grid, state, paths);
 
         // A full-repair group excludes both old paths, then inserts replacements

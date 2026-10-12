@@ -39,11 +39,13 @@ mapf::SolutionConflicts updateSolutionConflicts(
 // their explicit path ends. Reservation IDs must match byAgent indexes.
 // The state must already include newPath and current goal reservations;
 // it is read without copying or modifying the reservations.
-// An empty suffix leaves conflicts unchanged.
-mapf::SolutionConflicts UpdateSolutionConflictsV2(
+// Conflicts are updated in place; unrelated events retain their storage.
+// An empty suffix leaves conflicts unchanged. If an allocation fails during
+// mutation, discard this conflict state (it may be partially updated).
+void UpdateSolutionConflictsV2(
     const std::list<mapf::Cell*>& newPath,
     const mapf::PathReservationState& state,
-    mapf::SolutionConflicts conflicts,
+    mapf::SolutionConflicts& conflicts,
     int agentId,
     int pathIndex
 );

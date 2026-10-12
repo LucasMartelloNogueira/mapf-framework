@@ -17,6 +17,46 @@ namespace {
 }
 
 int main() {
+    // Missing entries are unrestricted; an explicitly empty entry is blocked.
+    // Edge restrictions still apply when both endpoints use implicit intervals.
+    {
+        mapf::Grid grid(1, 3);
+        auto* start = grid.getCellPtr(0, 0);
+        auto* middle = grid.getCellPtr(1, 0);
+        auto* goal = grid.getCellPtr(2, 0);
+        mapf::AStarSippSolver solver;
+        mapf::SafeIntervalTable sparse;
+        sparse.blockedEdgeArrivals[{start, middle}].insert(6);
+        const auto path = solver.solve(grid, start, goal, sparse, 5,
+            mapf::AStarSippSolver::GoalOccupation::Permanent);
+        requireTest(path == std::list<mapf::Cell*>({start, start, middle, goal}),
+            "Implicit intervals lost the edge reservation or permanent goal.");
+        requireTest(sparse.safeIntervalsByCell.empty(), "Search materialized unrestricted cells.");
+        auto dense = fullySafeTable(grid);
+        dense.blockedEdgeArrivals = sparse.blockedEdgeArrivals;
+        requireTest(path == solver.solve(grid, start, goal, dense, 5,
+            mapf::AStarSippSolver::GoalOccupation::Permanent), "Sparse and dense searches differ.");
+        sparse.safeIntervalsByCell[middle] = {};
+        requireTest(solver.solve(grid, start, goal, sparse, 5).empty(),
+            "An explicitly blocked cell was treated as unrestricted.");
+        sparse.safeIntervalsByCell.clear();
+        middle->isFree = false;
+        requireTest(solver.solve(grid, start, goal, sparse, 5).empty(),
+            "Implicit intervals made an obstacle traversable.");
+    }
+
+    // The path-based table builder is sparse too, including fully blocked goals.
+    {
+        mapf::Grid grid(30, 30);
+        auto* occupied = grid.getCellPtr(10, 10);
+        mapf::AStarSippSolver solver;
+        const auto table = solver.getSafeIntervalsByCell(grid, {{occupied}});
+        requireTest(table.safeIntervalsByCell.size() == 1 &&
+            table.safeIntervalsByCell.at(occupied).empty(), "Builder materialized unused cells.");
+        requireTest(solver.solve(grid, grid.getCellPtr(0, 0), occupied, table, 0).empty(),
+            "Permanent occupancy was lost in a sparse table.");
+    }
+
     // Scenario: a SIPP segment starts at absolute time 5. Expected: it arrives after two moves at absolute time 7.
     {
         mapf::Grid grid(1, 3);

@@ -13,6 +13,9 @@ namespace mapf {
 
     inline constexpr int SAFE_INTERVAL_INFINITY = std::numeric_limits<int>::max() / 4;
 
+    // A missing cell has the implicit interval [0, SAFE_INTERVAL_INFINITY].
+    // An explicitly empty vector means blocked at every time. Grid obstacles
+    // remain impassable regardless of this table.
     using SafeIntervalsByCell = std::unordered_map<Cell*, std::vector<Interval>>;
     using BlockedEdgeArrivals = std::unordered_map<EdgeKey, std::unordered_set<int>, EdgeKeyHash>;
 

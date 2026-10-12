@@ -79,11 +79,9 @@ mapf::SolutionConflicts getCollision(const std::vector<std::list<mapf::Cell*>>& 
     conflicts.byAgent.resize(paths.size());
     std::unordered_map<mapf::Cell*, int> startOwners;
     std::unordered_map<mapf::Cell*, GoalOccupancy> goalVertexLookup;
-    std::vector<int> arrivalTimes(paths.size(), -1);
     startOwners.reserve(paths.size());
     goalVertexLookup.reserve(paths.size());
     std::size_t explicitCells = 0;
-    std::size_t moves = 0;
     int i = 0;
 
     // Validate every pointer before hashing coordinates, and register all goals
@@ -95,85 +93,105 @@ mapf::SolutionConflicts getCollision(const std::vector<std::list<mapf::Cell*>>& 
                 throw std::invalid_argument("Path time or total size is unrepresentable.");
             }
             explicitCells += path.size();
-            mapf::Cell* previous = nullptr;
             for (mapf::Cell* cell : path) {
                 if (cell == nullptr) {
                     throw std::invalid_argument("Paths must not contain null cells.");
                 }
-                if (previous != nullptr && previous != cell) {
-                    ++moves; // At most explicitCells, whose sum was checked above.
-                }
-                previous = cell;
             }
             const int arrival = static_cast<int>(path.size() - 1);
             if (!startOwners.emplace(path.front(), i).second ||
                 !goalVertexLookup.emplace(path.back(), GoalOccupancy{i, arrival}).second) {
                 throw std::invalid_argument("Path starts and path goals must each be unique.");
             }
-            arrivalTimes[static_cast<std::size_t>(i)] = arrival;
         }
         ++i;
     }
 
-    std::unordered_map<mapf::CellTime, mapf::VertexEvent, mapf::CellTimeHash> vertexLookup;
-    std::unordered_map<mapf::EdgeTime, mapf::EdgeEvent, mapf::EdgeTimeHash> edgeLookup;
-    vertexLookup.reserve(explicitCells);
-    edgeLookup.reserve(moves);
-    i = 0;
-    for (const std::list<mapf::Cell*>& path : paths) {
-        std::size_t position = 0;
-        mapf::Cell* previousCell = nullptr;
-        for (mapf::Cell* cell : path) {
-            const int time = static_cast<int>(position);
-            std::unordered_set<int>& occupants = vertexLookup[{cell, time}].participants;
-            occupants.insert(i);
-            
-            const std::unordered_map<mapf::Cell*, GoalOccupancy>::const_iterator goal =
-                goalVertexLookup.find(cell);
+    struct Cursor {
+        int agent;
+        std::list<mapf::Cell*>::const_iterator current;
+        std::list<mapf::Cell*>::const_iterator end;
+        mapf::Cell* previous = nullptr;
+    };
+    struct Visit { mapf::Cell* cell; int agent; };
+    struct Movement { mapf::EdgeTime key; int agent; bool forward; };
+    std::vector<Cursor> cursors;
+    std::vector<Visit> visits;
+    std::vector<Movement> movements;
+    for (std::size_t index = 0; index < paths.size(); ++index) {
+        if (!paths[index].empty()) {
+            cursors.push_back({static_cast<int>(index), paths[index].begin(), paths[index].end()});
+        }
+    }
+    visits.reserve(cursors.size());
+    movements.reserve(cursors.size());
 
-            if (goal != goalVertexLookup.cend() && goal->second.i != i &&
-                goal->second.arrivalTime < time) {
-                occupants.insert(goal->second.i);
+    // Keep occupancy for one time step only. Hash-table nodes and participant
+    // sets are allocated exclusively for actual conflicts, not every visit.
+    for (std::size_t tick = 0; !cursors.empty(); ++tick) {
+        const int time = static_cast<int>(tick);
+        visits.clear();
+        movements.clear();
+        for (std::size_t index = 0; index < cursors.size();) {
+            auto& cursor = cursors[index];
+            mapf::Cell* cell = *cursor.current;
+            visits.push_back({cell, cursor.agent});
+            if (cursor.previous != nullptr && cursor.previous != cell) {
+                const auto key = mapf::makeEdgeTime(cursor.previous, cell, time);
+                movements.push_back({key, cursor.agent, cursor.previous == key.first});
             }
-            if (previousCell != nullptr && previousCell != cell) {
-                const mapf::EdgeTime key = mapf::makeEdgeTime(previousCell, cell, time);
-                mapf::EdgeEvent& event = edgeLookup[key];
-                if (previousCell == key.first) {
-                    event.forward.insert(i);
-                } else {
-                    event.reverse.insert(i);
+            cursor.previous = cell;
+            if (++cursor.current == cursor.end) {
+                cursor = cursors.back();
+                cursors.pop_back();
+            } else {
+                ++index;
+            }
+        }
+        std::sort(visits.begin(), visits.end(), [](const Visit& a, const Visit& b) {
+            return mapf::cellComesBefore(a.cell, b.cell);
+        });
+        for (std::size_t begin = 0; begin < visits.size();) {
+            std::size_t end = begin + 1;
+            mapf::Cell* cell = visits[begin].cell;
+            while (end < visits.size() && visits[end].cell == cell) ++end;
+            const auto goal = goalVertexLookup.find(cell);
+            const bool parked = goal != goalVertexLookup.end() && goal->second.arrivalTime < time;
+            if (end - begin > 1 || parked) {
+                auto& event = conflicts.vertexEvents[{cell, time}];
+                for (std::size_t j = begin; j < end; ++j) {
+                    event.participants.insert(visits[j].agent);
+                    conflicts.byAgent[visits[j].agent].push_back(mapf::CellConflict{cell, time});
+                }
+                if (parked) event.participants.insert(goal->second.i);
+            }
+            begin = end;
+        }
+        std::sort(movements.begin(), movements.end(), [](const Movement& a, const Movement& b) {
+            if (a.key.first != b.key.first) return mapf::cellComesBefore(a.key.first, b.key.first);
+            return mapf::cellComesBefore(a.key.second, b.key.second);
+        });
+        for (std::size_t begin = 0; begin < movements.size();) {
+            std::size_t end = begin + 1;
+            bool forward = movements[begin].forward;
+            bool reverse = !forward;
+            while (end < movements.size() && movements[end].key == movements[begin].key) {
+                forward = forward || movements[end].forward;
+                reverse = reverse || !movements[end].forward;
+                ++end;
+            }
+            if (forward && reverse) {
+                const auto& key = movements[begin].key;
+                auto& event = conflicts.edgeEvents[key];
+                const mapf::EdgeConflict record {key.first, key.second, time};
+                for (std::size_t j = begin; j < end; ++j) {
+                    auto& participants = movements[j].forward ? event.forward : event.reverse;
+                    participants.insert(movements[j].agent);
+                    conflicts.byAgent[movements[j].agent].push_back(record);
                 }
             }
-            previousCell = cell;
-            ++position;
+            begin = end;
         }
-        ++i;
-    }
-
-    for (std::pair<const mapf::CellTime, mapf::VertexEvent>& entry : vertexLookup) {
-        if (entry.second.participants.size() < 2) {
-            continue;
-        }
-        for (int owner : entry.second.participants) {
-            if (entry.first.time <= arrivalTimes[static_cast<std::size_t>(owner)]) {
-                conflicts.byAgent[static_cast<std::size_t>(owner)].push_back(
-                    mapf::CellConflict{entry.first.cell, entry.first.time});
-            }
-        }
-        conflicts.vertexEvents.emplace(entry.first, std::move(entry.second));
-    }
-    for (std::pair<const mapf::EdgeTime, mapf::EdgeEvent>& entry : edgeLookup) {
-        if (!entry.second.active()) {
-            continue;
-        }
-        const mapf::EdgeConflict record{entry.first.first, entry.first.second, entry.first.time};
-        for (int owner : entry.second.forward) {
-            conflicts.byAgent[static_cast<std::size_t>(owner)].push_back(record);
-        }
-        for (int owner : entry.second.reverse) {
-            conflicts.byAgent[static_cast<std::size_t>(owner)].push_back(record);
-        }
-        conflicts.edgeEvents.emplace(entry.first, std::move(entry.second));
     }
     for (std::vector<std::variant<mapf::CellConflict, mapf::EdgeConflict>>& records : conflicts.byAgent) {
         std::sort(records.begin(), records.end(), mapf::conflictRecordComesBefore);
@@ -295,10 +313,10 @@ mapf::SolutionConflicts updateSolutionConflicts(
     return conflicts;
 }
 
-mapf::SolutionConflicts UpdateSolutionConflictsV2(
+void UpdateSolutionConflictsV2(
     const std::list<mapf::Cell*>& newPath,
     const mapf::PathReservationState& state,
-    mapf::SolutionConflicts conflicts,
+    mapf::SolutionConflicts& conflicts,
     int agentId,
     int pathIndex
 ) {
@@ -318,7 +336,7 @@ mapf::SolutionConflicts UpdateSolutionConflictsV2(
         }
     }
     if (static_cast<std::size_t>(pathIndex) == path.size()) {
-        return conflicts;
+        return;
     }
 
     const auto explicitOccupantsAt = [&state](mapf::Cell* cell, int time) -> const std::unordered_set<int>* {
@@ -458,7 +476,7 @@ mapf::SolutionConflicts UpdateSolutionConflictsV2(
             conflicts.edgeEvents.erase(key);
         }
     }
-    return conflicts;
+    return;
 }
 
 

@@ -127,6 +127,46 @@ scripts/run_experiment.sh normal -- \
 O algoritmo, as regras de prioridade e o comportamento em falhas estão em
 [`docs/full_path_repair_iterative_solver.md`](docs/full_path_repair_iterative_solver.md).
 
+## Bateria comparativa de experimentos
+
+[`scripts/experiments.sh`](scripts/experiments.sh) executa as 216 combinações da
+matriz abaixo, usando o cenário `random-1` correspondente a cada mapa:
+
+| Mapa | Quantidades de agentes |
+| --- | --- |
+| `den520d` | 500, 700, 900 |
+| `empty-8-8` | 8, 16, 32 |
+| `empty-32-32` | 300, 400, 500 |
+| `random-32-32-20` | 50, 100, 150 |
+| `warehouse-10-20-10-2-1` | 150, 250, 350 |
+| `ost003d` | 100, 300, 500 |
+
+Para cada quantidade de agentes, são executados os quatro solvers:
+
+- `PriorityPlanningSolver` e `FullPathRepairIterativeSolver`: uma execução cada.
+- `LocalPathRepairIterativeSolver`: duas execuções, uma por estratégia local.
+- `LocalPathRepairParallelSolver`: oito execuções, combinando 2, 4, 8 e 16 threads
+  com `RESOLVE_BY_AGENT` e `RESOLVE_BY_TIME`.
+
+Isso resulta em 36 execuções por mapa. As flags opcionais são enviadas somente
+aos solvers que as aceitam. As execuções são sequenciais, com progresso e código
+de resultado no terminal; uma falha não impede os próximos casos. Ao final, o
+script retorna `2` se houve erro de configuração/execução, `1` se alguma chamada
+retornou `1` (sem solução ou falha na gravação), ou `0` se todas tiveram sucesso.
+
+```bash
+# Conferir os comandos sem iniciar os solvers; não exige compilação.
+scripts/experiments.sh --dry-run
+
+# Executar usando build/normal/mapf_app, compilado previamente.
+scripts/experiments.sh
+
+# Opcional: usar build/profile/mapf_app, compilado previamente.
+scripts/experiments.sh profile
+```
+
+O script avisa sobre cenários com agentes insuficientes antes de iniciar a bateria.
+
 ## Resultados
 
 Cada experimento cria uma pasta própria:

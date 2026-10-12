@@ -288,7 +288,7 @@ int main() {
             "Uncommitted group paths leaked into the CSV.");
         const auto stats = readFile(directory / (prefix + "_stats.csv"));
         requireTest(stats.find("\n-,-,4,false,2,7,3,") != std::string::npos &&
-            stats.find(",false,1,FullPathRepairIterativeSolver,false,-,2,1,1\n") != std::string::npos,
+            stats.find(",false,1,FullPathRepairIterativeSolver,-,2,1,1\n") != std::string::npos,
             "Partial full-path metrics or metadata differ.");
         std::filesystem::remove_all(directory);
     }

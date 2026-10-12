@@ -274,15 +274,18 @@ int main() {
         const auto before = getCollision({detour, paths[1]});
         const auto state = explicitReservations(paths);
         const auto originalOccupancy = state.vertex_agents;
-        const auto updated = UpdateSolutionConflictsV2(paths[0], state, before, 0, 0);
+        auto updated = before;
+        UpdateSolutionConflictsV2(paths[0], state, updated, 0, 0);
         requireSameConflicts(updated, getCollision(paths));
         requireTest(updated.byAgent[0].size() == 1 && updated.byAgent[1].size() == 1,
             "V2 did not add the vertex record to every participant.");
-        const auto unchanged = UpdateSolutionConflictsV2(paths[0], state, updated, 0, 0);
+        auto unchanged = updated;
+        UpdateSolutionConflictsV2(paths[0], state, unchanged, 0, 0);
         requireSameConflicts(unchanged, updated);
-        const auto resolved = UpdateSolutionConflictsV2(detour, explicitReservations({detour, paths[1]}), updated, 0, 0);
+        auto resolved = updated;
+        UpdateSolutionConflictsV2(detour, explicitReservations({detour, paths[1]}), resolved, 0, 0);
         requireSameConflicts(resolved, before);
-        requireTest(state.vertex_agents == originalOccupancy && before.empty(), "V2 mutated its inputs.");
+        requireTest(state.vertex_agents == originalOccupancy && before.empty(), "V2 mutated the reservations or the independent snapshot.");
     }
 
     // A new edge swap is registered for both directions. A detour removes both
@@ -294,14 +297,17 @@ int main() {
         std::vector<std::list<mapf::Cell*>> paths {{left, right}, {right, left}};
         mapf::SolutionConflicts before;
         before.byAgent.resize(2);
-        const auto updated = UpdateSolutionConflictsV2(paths[agentId], explicitReservations(paths), before, agentId, 0);
+        auto updated = before;
+        UpdateSolutionConflictsV2(paths[agentId], explicitReservations(paths), updated, agentId, 0);
         requireSameConflicts(updated, getCollision(paths));
-        const auto repeated = UpdateSolutionConflictsV2(paths[agentId], explicitReservations(paths), updated, agentId, 0);
+        auto repeated = updated;
+        UpdateSolutionConflictsV2(paths[agentId], explicitReservations(paths), repeated, agentId, 0);
         requireSameConflicts(repeated, updated);
         const int startX = agentId == 0 ? 0 : 1;
         paths[agentId] = {grid.getCellPtr(startX, 0), grid.getCellPtr(startX, 1),
             grid.getCellPtr(1 - startX, 1), grid.getCellPtr(1 - startX, 0)};
-        const auto resolved = UpdateSolutionConflictsV2(paths[agentId], explicitReservations(paths), updated, agentId, 0);
+        auto resolved = updated;
+        UpdateSolutionConflictsV2(paths[agentId], explicitReservations(paths), resolved, agentId, 0);
         requireSameConflicts(resolved, getCollision(paths));
         requireTest(resolved.empty(), "V2 retained a resolved edge swap.");
     }
@@ -316,7 +322,8 @@ int main() {
         auto* d = grid.getCellPtr(0, 1);
         const std::vector<std::list<mapf::Cell*>> paths {{a, b}, {b, c}, {c, d}, {d, a}};
         const auto before = getCollision(paths);
-        const auto updated = UpdateSolutionConflictsV2(paths[0], explicitReservations(paths), before, 0, 0);
+        auto updated = before;
+        UpdateSolutionConflictsV2(paths[0], explicitReservations(paths), updated, 0, 0);
         requireSameConflicts(updated, before);
     }
 
@@ -334,13 +341,15 @@ int main() {
         };
         const auto before = getCollision(paths);
         paths[0] = {cell(0, 1), cell(0, 2), cell(1, 2), cell(2, 2), cell(3, 2), cell(3, 1)};
-        const auto first = UpdateSolutionConflictsV2(paths[0], explicitReservations(paths), before, 0, 0);
+        auto first = before;
+        UpdateSolutionConflictsV2(paths[0], explicitReservations(paths), first, 0, 0);
         requireSameConflicts(first, getCollision(paths));
         const auto& edge = first.edgeEvents.at(mapf::makeEdgeTime(a, b, 2));
         requireTest(edge.forward == std::unordered_set<int>{1} && edge.reverse == std::unordered_set<int>{2},
             "V2 lost the remaining active edge participants.");
         paths[1] = {cell(1, 0), cell(2, 0), cell(3, 0), cell(3, 1), cell(3, 2), cell(2, 2)};
-        const auto second = UpdateSolutionConflictsV2(paths[1], explicitReservations(paths), first, 1, 0);
+        auto second = first;
+        UpdateSolutionConflictsV2(paths[1], explicitReservations(paths), second, 1, 0);
         requireSameConflicts(second, getCollision(paths));
         requireTest(!second.edgeEvents.contains(mapf::makeEdgeTime(a, b, 2)),
             "V2 retained an edge with participants in only one direction.");
@@ -363,7 +372,11 @@ int main() {
         for (int id : {1, 3}) before.byAgent[id].push_back(unrelated);
         auto state = explicitReservations({path});
         state.vertex_agents[center][1] = {0, 2, 3};
-        const auto updated = UpdateSolutionConflictsV2(path, state, before, 0, 0);
+        auto updated = before;
+        const auto* unrelatedStorage = &updated.vertexEvents.at({unrelated.cell, unrelated.time});
+        UpdateSolutionConflictsV2(path, state, updated, 0, 0);
+        requireTest(&updated.vertexEvents.at({unrelated.cell, unrelated.time}) == unrelatedStorage,
+            "In-place conflict update replaced unrelated event storage.");
         requireTest(updated.vertexEvents.at({center, 1}).participants == std::unordered_set<int>({0, 2, 3}),
             "V2 did not refresh the participants of a continuing vertex conflict.");
         requireTest(updated.byAgent[1].size() == 1 && updated.byAgent[3].size() == 2 &&
@@ -385,8 +398,11 @@ int main() {
         };
         const auto state = explicitReservations(paths);
         const auto before = getCollision(paths);
-        requireSameConflicts(UpdateSolutionConflictsV2(paths[0], state, before, 0, 2), before);
-        requireSameConflicts(UpdateSolutionConflictsV2(paths[0], state, before, 0, 4), before);
+        auto updated = before;
+        UpdateSolutionConflictsV2(paths[0], state, updated, 0, 2);
+        requireSameConflicts(updated, before);
+        UpdateSolutionConflictsV2(paths[0], state, updated, 0, 4);
+        requireSameConflicts(updated, before);
     }
 
     // Empty/single-cell paths, waits, missing occupancy entries and invalid
@@ -397,13 +413,16 @@ int main() {
         mapf::SolutionConflicts before;
         before.byAgent.resize(1);
         for (const std::list<mapf::Cell*>& path : std::vector<std::list<mapf::Cell*>>{{}, {cell}, {cell, cell}}) {
-            requireSameConflicts(UpdateSolutionConflictsV2(path, explicitReservations({path}), before, 0, 0), before);
+            auto updated = before;
+            UpdateSolutionConflictsV2(path, explicitReservations({path}), updated, 0, 0);
+            requireSameConflicts(updated, before);
         }
         mapf::SolutionConflicts stale;
         stale.byAgent.resize(2);
         stale.vertexEvents[{cell, 0}].participants = {0, 1};
         for (int id : {0, 1}) stale.byAgent[id].push_back(mapf::CellConflict{cell, 0});
-        const auto cleared = UpdateSolutionConflictsV2({cell}, {}, stale, 0, 0);
+        auto cleared = stale;
+        UpdateSolutionConflictsV2({cell}, {}, cleared, 0, 0);
         requireTest(cleared.empty() && cleared.byAgent[0].empty() && cleared.byAgent[1].empty(),
             "V2 failed to clear a conflict with no remaining occupancy.");
         for (const auto& [agentId, pathIndex] : std::vector<std::pair<int, int>>{{-1, 0}, {1, 0}, {0, -1}, {0, 2}}) {
