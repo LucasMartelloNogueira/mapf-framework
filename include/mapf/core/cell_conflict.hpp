@@ -5,8 +5,8 @@
 namespace mapf {
 
     struct CellConflict {
-        const Cell& cell;
-        const int time;
+        Cell* cell;
+        int time;
     };
 
 }

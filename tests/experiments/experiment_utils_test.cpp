@@ -1,0 +1,297 @@
+#include "experiment_utils.hpp"
+
+#include "mapf/utils.hpp"
+#include "mapf/solvers/full_path_repair_iterative_solver.hpp"
+#include "test_support.hpp"
+
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <set>
+#include <string>
+#include <vector>
+
+namespace {
+    mapf::Agent agent(int id, int startX, int startY, int goalX, int goalY) {
+        mapf::Position start {.x = startX, .y = startY};
+        mapf::Position goal {.x = goalX, .y = goalY};
+        return {
+            .id = id,
+            .currentPosition = start,
+            .startPosition = start,
+            .goalPosition = goal
+        };
+    }
+
+    std::set<std::filesystem::path> resultDirectories() {
+        std::set<std::filesystem::path> directories;
+        const std::filesystem::path results =
+            mapf::experiments::repositoryRoot() / "results";
+        if (!std::filesystem::exists(results)) {
+            return directories;
+        }
+
+        for (const std::filesystem::directory_entry& entry :
+            std::filesystem::directory_iterator(results)) {
+            if (entry.is_directory()) {
+                directories.insert(entry.path());
+            }
+        }
+        return directories;
+    }
+
+    std::filesystem::path onlyNewDirectory(
+        const std::set<std::filesystem::path>& before,
+        const std::set<std::filesystem::path>& after
+    ) {
+        std::vector<std::filesystem::path> difference;
+        for (const std::filesystem::path& path : after) {
+            if (!before.contains(path)) {
+                difference.push_back(path);
+            }
+        }
+        requireTest(difference.size() == 1, "Expected exactly one new experiment directory.");
+        return difference.front();
+    }
+
+    std::string readFile(const std::filesystem::path& path) {
+        std::ifstream input(path);
+        return std::string(
+            std::istreambuf_iterator<char>(input),
+            std::istreambuf_iterator<char>()
+        );
+    }
+}
+
+int main() {
+    // Scenario: three agents pass through one vertex together and continue to distinct goals. Expected: the event normalizes into one record with every sorted experiment ID.
+    {
+        std::vector<std::vector<int>> freeCells(2, std::vector<int>(3, 1));
+        std::vector<mapf::Agent> agents {
+            agent(8, 0, 0, 2, 0),
+            agent(2, 2, 0, 1, 1),
+            agent(5, 1, 1, 0, 0)
+        };
+        mapf::Instance instance(&freeCells, 2, 3, agents);
+        mapf::Cell* center = instance.getGrid().getCellPtr(1, 0);
+        std::vector<std::list<mapf::Cell*>> paths {
+            {instance.getGrid().getCellPtr(0, 0), center, instance.getGrid().getCellPtr(2, 0)},
+            {instance.getGrid().getCellPtr(2, 0), center, instance.getGrid().getCellPtr(1, 1)},
+            {instance.getGrid().getCellPtr(1, 1), center, instance.getGrid().getCellPtr(0, 0)}
+        };
+
+        std::vector<mapf::experiments::ConflictRecord> conflicts =
+            mapf::experiments::normalizeConflicts(instance, paths);
+        requireTest(conflicts.size() == 1, "Vertex conflicts were not normalized.");
+        requireTest(
+            conflicts[0].agentIds == std::vector<int>({0, 1, 2}),
+            "Normalized agent IDs are incomplete or unsorted."
+        );
+    }
+
+    // Scenario: two output descriptors are requested immediately. Expected: both use nested run paths and distinct millisecond prefixes.
+    {
+        const mapf::experiments::ExperimentOutputPaths first =
+            mapf::experiments::makeExperimentOutputPaths();
+        const mapf::experiments::ExperimentOutputPaths second =
+            mapf::experiments::makeExperimentOutputPaths();
+        requireTest(first.prefix != second.prefix, "Output prefixes collided.");
+        requireTest(
+            first.stats.parent_path() == first.directory &&
+                first.solution.parent_path() == first.directory &&
+                first.conflicts.parent_path() == first.directory,
+            "Artifacts are not nested in the run directory."
+        );
+        requireTest(
+            first.stats.filename() == first.prefix + "_stats.csv",
+            "Stats filename does not repeat the run prefix."
+        );
+    }
+
+    // Scenario: a rectangular CSV contains commas and quotes. Expected: the generalized writer escapes fields and rejects malformed row widths.
+    {
+        const std::filesystem::path path =
+            std::filesystem::temp_directory_path() /
+            ("mapf_csv_test_" + std::to_string(
+                std::chrono::steady_clock::now().time_since_epoch().count()
+            ) + ".csv");
+        requireTest(
+            writeRowsToCsvFile(path, {"first", "second"}, {{"a,b", "c\"d"}}),
+            "Rectangular CSV write failed."
+        );
+        requireTest(
+            readFile(path) == "first,second\n\"a,b\",\"c\"\"d\"\n",
+            "CSV escaping is incorrect."
+        );
+        requireTest(
+            !writeRowsToCsvFile(path, {"first", "second"}, {{"one"}}),
+            "A malformed row width was accepted."
+        );
+        std::filesystem::remove(path);
+    }
+
+    // Successful unit paths preserve schemas and solver metadata for both repair algorithms.
+    for (const std::string solver : {"LocalPathRepairIterativeSolver", "FullPathRepairIterativeSolver"}) {
+        const bool local = solver == "LocalPathRepairIterativeSolver";
+        std::vector<std::vector<int>> freeCells {{1}};
+        std::vector<mapf::Agent> agents {agent(42, 0, 0, 0, 0)};
+        mapf::Instance instance(&freeCells, 1, 1, agents);
+        std::list<mapf::Cell*> path {instance.getGrid().getCellPtr(0, 0)};
+        mapf::experiments::ExperimentRunResult run {
+            .metrics = mapf::Result(true, 0, 0, 0.0, 0.25),
+            .initialPaths = {path},
+            .solutionPaths = {path},
+            .numAgents = 1,
+            .solver = solver,
+            .multithreading = false,
+            .numThreads = 1,
+            .localRepair = local
+        };
+
+        const std::set<std::filesystem::path> before = resultDirectories();
+        requireTest(
+            mapf::experiments::writeExperimentArtifacts(instance, run, 0.5),
+            "Successful artifact bundle write failed."
+        );
+        const std::filesystem::path directory = onlyNewDirectory(
+            before,
+            resultDirectories()
+        );
+        const std::string prefix = directory.filename().string();
+        const std::filesystem::path stats = directory / (prefix + "_stats.csv");
+        const std::filesystem::path solution = directory / (prefix + "_solution.csv");
+        const std::filesystem::path conflicts = directory / (prefix + "_conflicts.csv");
+
+        requireTest(std::filesystem::exists(stats), "Stats artifact is missing.");
+        requireTest(std::filesystem::exists(solution), "Solution artifact is missing.");
+        requireTest(!std::filesystem::exists(conflicts), "Successful run wrote conflicts.");
+        requireTest(
+            readFile(stats).rfind(
+                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts\n",
+                0
+            ) == 0,
+            "Stats header is incorrect."
+        );
+        requireTest(
+            readFile(stats).find("\n-,-,1,true,") != std::string::npos,
+            "Stats agent count is incorrect."
+        );
+        requireTest(
+            readFile(stats).find(
+                ",false,1," + solver + (local ? ",RESOLVE_BY_AGENT,0,0,0\n" : ",-,0,0,0\n")
+            ) != std::string::npos,
+            "Stats solver metadata is incorrect."
+        );
+        requireTest(
+            readFile(solution).rfind(
+                "agent_id,agent_scenario_bucket,start,goal,optimum_path,solution_path,optimum_path_cost,solution_path_cost,success_optimum_path,success_solution_path\n",
+                0
+            ) == 0,
+            "Solution header is incorrect."
+        );
+        requireTest(
+            readFile(solution).find(
+                "0,-1,0-0,0-0,0-0,0-0,0,0,true,true"
+            ) != std::string::npos,
+            "Solution zero-cost serialization is incorrect."
+        );
+
+        std::filesystem::remove_all(directory);
+
+        // Scenario: normalized metadata claims two agents for a one-agent instance. Expected: the writer rejects the inconsistent count without creating a bundle.
+        run.numAgents = 2;
+        const std::set<std::filesystem::path> beforeInvalidCount = resultDirectories();
+        requireTest(
+            !mapf::experiments::writeExperimentArtifacts(instance, run, 0.5),
+            "Mismatched normalized agent count was accepted."
+        );
+        requireTest(
+            resultDirectories() == beforeInvalidCount,
+            "Mismatched normalized agent count created an artifact bundle."
+        );
+        if (!local) {
+            run.numAgents = 1;
+            for (int field = 0; field < 4; ++field) {
+                auto invalid = run;
+                switch (field) {
+                case 0: invalid.multithreading = true; break;
+                case 1: invalid.numThreads = 2; break;
+                case 2: invalid.localRepair = true; break;
+                case 3: invalid.localRepairStrategy = mapf::LocalRepairStrategy::RESOLVE_BY_AGENT; break;
+                }
+                requireTest(!mapf::experiments::writeExperimentArtifacts(instance, invalid, 0.5),
+                    "Full-path writer accepted inconsistent solver metadata.");
+            }
+            requireTest(resultDirectories() == beforeInvalidCount, "Invalid full-path metadata created artifacts.");
+        }
+    }
+
+    // Scenario: local repair fails without a geometric conflict because its only final path is missing. Expected: the run directory contains a header-only conflicts CSV.
+    for (const std::string solver : {"LocalPathRepairParallelSolver", "FullPathRepairIterativeSolver"}) {
+        const bool local = solver == "LocalPathRepairParallelSolver";
+        std::vector<std::vector<int>> freeCells {{1}};
+        std::vector<mapf::Agent> agents {agent(1, 0, 0, 0, 0)};
+        mapf::Instance instance(&freeCells, 1, 1, agents);
+        std::list<mapf::Cell*> initialPath {instance.getGrid().getCellPtr(0, 0)};
+        mapf::experiments::ExperimentRunResult run {
+            .metrics = mapf::Result(false, 0, 0, 0.0, 0.1),
+            .initialPaths = {initialPath},
+            .solutionPaths = {{}},
+            .numAgents = 1,
+            .solver = solver,
+            .multithreading = local,
+            .numThreads = local ? 2U : 1U,
+            .localRepair = local
+        };
+
+        const std::set<std::filesystem::path> before = resultDirectories();
+        requireTest(
+            mapf::experiments::writeExperimentArtifacts(instance, run, 0.2),
+            "Failed-run artifact bundle write failed."
+        );
+        const std::filesystem::path directory = onlyNewDirectory(
+            before,
+            resultDirectories()
+        );
+        const std::string prefix = directory.filename().string();
+        requireTest(
+            readFile(directory / (prefix + "_conflicts.csv")) ==
+                "cell_1,cell_2,timestep,conflict_type,agents\n",
+            "Failed run did not write a header-only conflicts artifact."
+        );
+        std::filesystem::remove_all(directory);
+    }
+
+    // Serialize the last committed snapshot after a successful group and a failed group.
+    {
+        std::vector<std::vector<int>> free{{0, 0, 0, 1, 1, 1}, {1, 1, 0, 1, 1, 1}, {0, 0, 0, 1, 1, 1}};
+        mapf::Instance instance(&free, 3, 6, {agent(0, 3, 1, 5, 1), agent(1, 4, 0, 4, 2),
+            agent(2, 0, 1, 1, 1), agent(3, 1, 1, 0, 1)});
+        auto result = mapf::FullPathRepairIterativeSolver(instance).solve();
+        mapf::experiments::ExperimentRunResult run{
+            .metrics = result.metrics, .initialPaths = std::move(result.initialPaths),
+            .solutionPaths = std::move(result.paths), .numAgents = 4, .solver = "FullPathRepairIterativeSolver"
+        };
+        const auto before = resultDirectories();
+        requireTest(!run.metrics.success && mapf::experiments::writeExperimentArtifacts(instance, run, 0.5),
+            "Failed full-path snapshot could not be written.");
+        const auto directory = onlyNewDirectory(before, resultDirectories());
+        const auto prefix = directory.filename().string();
+        requireTest(readFile(directory / (prefix + "_conflicts.csv")) ==
+            "cell_1,cell_2,timestep,conflict_type,agents\n0-1,1-1,1,edge,2|3\n",
+            "Failure artifacts retained a repaired conflict or used incorrect agent IDs.");
+        const auto solution = readFile(directory / (prefix + "_solution.csv"));
+        requireTest(solution.find("1,-1,4-0,4-2,4-0|4-1|4-2,4-0|4-0|4-1|4-2,2,3,true,true\n") !=
+            std::string::npos, "Committed waits or preserved initial paths were lost in the CSV.");
+        requireTest(solution.find("2,-1,0-1,1-1,0-1|1-1,0-1|1-1,1,1,true,false\n") != std::string::npos,
+            "Uncommitted group paths leaked into the CSV.");
+        const auto stats = readFile(directory / (prefix + "_stats.csv"));
+        requireTest(stats.find("\n-,-,4,false,2,7,3,") != std::string::npos &&
+            stats.find(",false,1,FullPathRepairIterativeSolver,false,-,2,1,1\n") != std::string::npos,
+            "Partial full-path metrics or metadata differ.");
+        std::filesystem::remove_all(directory);
+    }
+
+    return 0;
+}

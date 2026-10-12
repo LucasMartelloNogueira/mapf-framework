@@ -2,14 +2,30 @@
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
-#include <unordered_set>
+#include <unordered_map>
 #include <utility>
 
 namespace mapf {
 
     namespace {
+        struct CoordinateKey {
+            int x;
+            int y;
+            bool operator==(const CoordinateKey& other) const = default;
+        };
+
+        struct CoordinateKeyHash {
+            std::size_t operator()(const CoordinateKey& key) const {
+                const std::size_t seed = std::hash<int>{}(key.x);
+                return seed ^ (std::hash<int>{}(key.y) +
+                    static_cast<std::size_t>(0x9e3779b9U) + (seed << 6) + (seed >> 2));
+            }
+        };
+
         void require(bool condition, const std::string& message) {
             if (!condition) {
                 throw std::runtime_error(message);
@@ -64,16 +80,21 @@ namespace mapf {
         mapName("-"),
         instanceName("-")
     {
-        std::unordered_set<int> ids;
+        require(this->agents.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()),
+            "Number of agents is unrepresentable.");
 
-        for (const Agent& agent : this->agents) {
-            require(ids.insert(agent.id).second, "Agent IDs must be unique.");
+        for (std::size_t i = 0; i < this->agents.size(); ++i) {
+            Agent& agent = this->agents[i];
+            agent.id = static_cast<int>(i);
 
             Cell* start = grid.getCellPtr(agent.startPosition.x, agent.startPosition.y);
             Cell* goal = grid.getCellPtr(agent.goalPosition.x, agent.goalPosition.y);
 
             require(start != nullptr && start->isFree, "Agent start position must be a free cell.");
             require(goal != nullptr && goal->isFree, "Agent goal position must be a free cell.");
+        }
+        if (!isValidInstance()) {
+            throw std::invalid_argument("Agent starts and agent goals must each be unique.");
         }
     }
 
@@ -172,6 +193,7 @@ namespace mapf {
 
             parsedAgents.push_back({
                 .id = agentId,
+                .scenarioId = bucket,
                 .currentPosition = startPosition,
                 .startPosition = startPosition,
                 .goalPosition = goalPosition
@@ -186,6 +208,25 @@ namespace mapf {
         numCols = width;
         agents = std::move(parsedAgents);
         grid = Grid(&freeCells, height, width);
+        if (!isValidInstance()) {
+            throw std::invalid_argument("Agent starts and agent goals must each be unique.");
+        }
+    }
+
+    bool Instance::isValidInstance() const {
+        std::unordered_map<CoordinateKey, int, CoordinateKeyHash> startOwners;
+        std::unordered_map<CoordinateKey, int, CoordinateKeyHash> goalOwners;
+        startOwners.reserve(agents.size());
+        goalOwners.reserve(agents.size());
+        for (const Agent& agent : agents) {
+            const CoordinateKey start{agent.startPosition.x, agent.startPosition.y};
+            const CoordinateKey goal{agent.goalPosition.x, agent.goalPosition.y};
+            if (!startOwners.emplace(start, agent.id).second ||
+                !goalOwners.emplace(goal, agent.id).second) {
+                return false;
+            }
+        }
+        return true;
     }
 
     Grid& Instance::getGrid() {

@@ -2,14 +2,27 @@ cmake_minimum_required(VERSION 3.20)
 
 project(mapf_framework LANGUAGES CXX)
 
+find_package(Threads REQUIRED)
+include(CTest)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Keep optimized profiling builds symbolized and their call stacks unwindable by
+# perf's frame-pointer collector. Release builds used by normal experiments are
+# intentionally unaffected.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(
+        $<$<CONFIG:RelWithDebInfo>:-fno-omit-frame-pointer>
+    )
+endif()
 
 add_library(mapf
     src/mapf/utils.cpp
     src/mapf/core/a-star-heap.cpp
     src/mapf/core/cell.cpp
+    src/mapf/core/conflict_key.cpp
     src/mapf/core/grid.cpp
     src/mapf/core/instance.cpp
     src/mapf/core/result.cpp
@@ -20,6 +33,10 @@ add_library(mapf
     src/mapf/pathfinding/sipp/edge_key_hash.cpp
     src/mapf/pathfinding/sipp/state_key.cpp
     src/mapf/pathfinding/sipp/state_key_hash.cpp
+    src/mapf/solvers/full_path_repair_iterative_solver.cpp
+    src/mapf/solvers/local_path_repair_iterative_solver.cpp
+    src/mapf/solvers/local_path_repair_parallel_solver.cpp
+    src/mapf/solvers/local_path_repair_solver_common.cpp
     src/mapf/solvers/priority_planning_solver.cpp
 )
 
@@ -28,7 +45,10 @@ target_include_directories(mapf
         ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-# Add external libraries with find_package(...) and target_link_libraries(mapf ...).
+target_link_libraries(mapf
+    PUBLIC
+        Threads::Threads
+)
 
 add_executable(mapf_app
     src/main.cpp
@@ -36,7 +56,7 @@ add_executable(mapf_app
 
 target_link_libraries(mapf_app
     PRIVATE
-        mapf
+        mapf_experiment_utils
 )
 
 add_library(mapf_experiment_utils
@@ -75,3 +95,104 @@ target_link_libraries(benchmark_experiment
     PRIVATE
         mapf_experiment_utils
 )
+
+option(MAPF_BUILD_COLLISION_BENCHMARK "Build the collision detector benchmark" OFF)
+if(MAPF_BUILD_COLLISION_BENCHMARK)
+    add_executable(collision_benchmark tools/collision_benchmark.cpp)
+    target_link_libraries(collision_benchmark PRIVATE mapf)
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" MAPF_BENCHMARK_BUILD_TYPE)
+    target_compile_definitions(collision_benchmark PRIVATE
+        MAPF_BENCHMARK_BUILD="${CMAKE_BUILD_TYPE}"
+        MAPF_BENCHMARK_FLAGS="${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${MAPF_BENCHMARK_BUILD_TYPE}}"
+    )
+endif()
+
+if(BUILD_TESTING)
+    add_executable(full_path_repair_iterative_solver_test
+        tests/solvers/full_path_repair_iterative_solver_test.cpp
+    )
+    target_link_libraries(full_path_repair_iterative_solver_test PRIVATE mapf)
+    target_include_directories(full_path_repair_iterative_solver_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/mapf/solvers
+    )
+    add_test(NAME full_path_repair_iterative_solver_test COMMAND full_path_repair_iterative_solver_test)
+
+    add_executable(path_reservation_state_test
+        tests/solvers/path_reservation_state_test.cpp
+    )
+    target_link_libraries(path_reservation_state_test PRIVATE mapf)
+    target_include_directories(path_reservation_state_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/mapf/solvers
+    )
+    add_test(NAME path_reservation_state_test COMMAND path_reservation_state_test)
+
+    add_executable(a_star_sipp_test
+        tests/pathfinding/a_star_sipp_test.cpp
+    )
+    target_link_libraries(a_star_sipp_test PRIVATE mapf)
+    target_include_directories(a_star_sipp_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(NAME a_star_sipp_test COMMAND a_star_sipp_test)
+
+    add_executable(utils_collision_test
+        tests/utils_collision_test.cpp
+    )
+    target_link_libraries(utils_collision_test PRIVATE mapf)
+    target_include_directories(utils_collision_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(NAME utils_collision_test COMMAND utils_collision_test)
+
+    add_executable(local_path_repair_parallel_solver_test
+        tests/solvers/local_path_repair_parallel_solver_test.cpp
+    )
+    target_link_libraries(local_path_repair_parallel_solver_test PRIVATE mapf)
+    target_include_directories(local_path_repair_parallel_solver_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(
+        NAME local_path_repair_parallel_solver_test
+        COMMAND local_path_repair_parallel_solver_test
+    )
+
+    add_executable(local_path_repair_iterative_solver_test
+        tests/solvers/local_path_repair_iterative_solver_test.cpp
+    )
+    target_link_libraries(local_path_repair_iterative_solver_test PRIVATE mapf)
+    target_include_directories(local_path_repair_iterative_solver_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(
+        NAME local_path_repair_iterative_solver_test
+        COMMAND local_path_repair_iterative_solver_test
+    )
+
+    add_executable(priority_planning_paths_test
+        tests/solvers/priority_planning_paths_test.cpp
+    )
+    target_link_libraries(priority_planning_paths_test PRIVATE mapf)
+    target_include_directories(priority_planning_paths_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(NAME priority_planning_paths_test COMMAND priority_planning_paths_test)
+
+    add_executable(experiment_utils_test
+        tests/experiments/experiment_utils_test.cpp
+    )
+    target_link_libraries(experiment_utils_test PRIVATE mapf_experiment_utils)
+    target_include_directories(experiment_utils_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(NAME experiment_utils_test COMMAND experiment_utils_test)
+
+    add_executable(cli_test
+        tests/experiments/cli_test.cpp
+        src/main.cpp
+    )
+    target_compile_definitions(cli_test PRIVATE MAPF_CLI_NO_MAIN)
+    target_link_libraries(cli_test PRIVATE mapf_experiment_utils)
+    target_include_directories(cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    add_test(NAME cli_test COMMAND cli_test)
+
+    find_program(BASH_EXECUTABLE bash)
+    if(BASH_EXECUTABLE)
+        add_test(
+            NAME profiling_scripts_test
+            COMMAND
+                ${BASH_EXECUTABLE}
+                ${CMAKE_CURRENT_SOURCE_DIR}/tests/scripts/profiling_scripts_test.sh
+                ${CMAKE_CURRENT_SOURCE_DIR}
+        )
+    endif()
+endif()
