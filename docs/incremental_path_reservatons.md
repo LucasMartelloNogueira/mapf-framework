@@ -19,7 +19,7 @@ Antes desta melhoria, o motor compartilhado de reparo local repetia a construç�
 
 Uma tentativa aceita após fallback podia, portanto, provocar três construções completas além da inicial: exclusão, fallback e aceitação. As diferentes âncoras de uma mesma tentativa já compartilhavam a tabela; não havia uma reconstrução por âncora.
 
-O objetivo é eliminar essas reconstruções e recalcular intervalos somente nas células dos caminhos removido e inserido. A primeira implementação manteve uma cópia completa por tentativa. Após o diagnóstico de desempenho, o reparo local passou a usar um registro das entradas afetadas para desfazer alterações, eliminando essa cópia. O solver de reparo completo mantém seu isolamento por cópia.
+O objetivo é eliminar essas reconstruções e recalcular intervalos somente nas células dos caminhos removido e inserido. A primeira implementação manteve uma cópia completa por tentativa. Após o diagnóstico de desempenho, os reparos local e completo passaram a usar `ReservationTransaction`, que registra as entradas afetadas para desfazer alterações, eliminando essa cópia. O reparo completo também usa `PathTransaction` para preservar apenas os caminhos substituídos, por troca dos nós das listas.
 
 ## 2. Dados necessários para desfazer reservas
 
@@ -132,6 +132,10 @@ Atualizar apenas a janela geométrica também é insuficiente: inserir duas espe
 
 Durante a tentativa local, `result.reservations` contém alterações provisórias protegidas por `ReservationTransaction`. Cada entrada afetada é registrada uma única vez; os nós originais são preservados e a tentativa trabalha sobre cópias apenas de seus valores. Rejeição, falha no fallback ou exceções removem as entradas provisórias e reinserem os nós originais sem alocação. Os mapas mantêm capacidade para o tamanho anterior. A restauração explícita precede o retorno por falha, e a confirmação ocorre depois das operações que podem alocar memória. Erros de contrato, como proprietário incorreto, segunda remoção ou destino já reservado, continuam sendo detectados.
 
+No `FullPathRepairIterativeSolver`, a mesma transação de reservas abrange todos os participantes do conflito. Todos os caminhos antigos do grupo são removidos antes da primeira busca. Cada substituição aceita é inserida nas reservas antes da busca seguinte, e `PathTransaction` instala o novo caminho guardando o antigo sem copiar seus nós. A validação global lê esses caminhos provisórios. Se qualquer participante ou a validação falhar, ambas as transações são desfeitas antes do cálculo das métricas e do retorno. A confirmação ocorre somente quando o grupo inteiro é válido.
+
+No `PriorityPlanningSolver`, `buildReservationState` é chamado uma vez com os caminhos finais ainda vazios. Os caminhos A* iniciais servem às métricas e não entram nas reservas dessa etapa. Cada busca SIPP recebe a tabela por referência, tempo inicial zero e `GoalOccupation::Permanent`; ao terminar, `updateReservationState` adiciona apenas o caminho encontrado, que é movido para sua posição no vetor final. Não existe um segundo vetor `reservedPaths`, nem reconstrução da tabela para cada agente. Como essa etapa apenas acrescenta caminhos e descarta seu estado local ao terminar, ela não precisa de uma transação para desfazer substituições.
+
 Todas as buscas de uma tentativa compartilham a tabela preparada, sem alterá-la. SIPP guarda índices e ponteiros para intervalos: se o índice `1` identifica `[4,+inf]`, fundir esse intervalo com `[0,2]` durante a busca eliminaria o índice. Fazer a exclusão antes das buscas e a inserção após seu término resolve esse risco nesta versão, sem cache por revisão.
 
 ## 6. Reutilizar a tabela no fallback preservando a política do destino
@@ -159,7 +163,10 @@ Isso remove tanto a reconstrução interna do fallback quanto a cópia dos demai
 | Local | Responsabilidade |
 | --- | --- |
 | [local_path_repair_solver.hpp](../include/mapf/solvers/local_path_repair_solver.hpp) | Tipos de ocupação temporal e proprietário do destino. |
-| [local_path_repair_solver_common.hpp](../src/mapf/solvers/local_path_repair_solver_common.hpp) e [implementação compartilhada](../src/mapf/solvers/local_path_repair_solver_common.cpp) | Construtor inicial, regeneração por célula, exclusão/inserção e coordenação da publicação. |
+| [solver_utils.hpp](../src/mapf/solvers/solver_utils.hpp) e [solver_utils.cpp](../src/mapf/solvers/solver_utils.cpp) | Construtor inicial, regeneração por célula, exclusão/inserção, transações de reservas/caminhos e cálculo das métricas dos reparos. |
+| [local_path_repair_solver_common.cpp](../src/mapf/solvers/local_path_repair_solver_common.cpp) | Coordenação dos reparos locais e publicação de seus resultados. |
+| [full_path_repair_iterative_solver.cpp](../src/mapf/solvers/full_path_repair_iterative_solver.cpp) | Transações de reservas e caminhos abrangendo o grupo inteiro. |
+| [priority_planning_solver.cpp](../src/mapf/solvers/priority_planning_solver.cpp) | Construção única da tabela e inserção incremental dos caminhos planejados. |
 | [a_star_sipp.hpp](../include/mapf/pathfinding/a_star_sipp.hpp) e [a_star_sipp.cpp](../src/mapf/pathfinding/a_star_sipp.cpp) | Política pública de destino e busca com tabela já construída. |
 | [path_reservation_state_test.cpp](../tests/solvers/path_reservation_state_test.cpp) | Equivalência com reconstrução completa e casos de atualização local. |
 | Testes de SIPP e dos solvers iterativo e paralelo | Compatibilidade das sobrecargas, consumidores dos mapas, falhas e estratégias de seleção. |
@@ -288,6 +295,19 @@ O RSS inclui todo o processo e depende do alocador; os valores não medem isolad
 
 Esses casos mostram a redução de reconstruções, mas favorecem reparos pequenos e independentes; não representam congestionamento intenso nem demonstram ganho universal. As buscas são curtas e o custo de copiar a tabela permanece significativo. O próximo passo de desempenho deve considerar instâncias representativas e a cópia global, antes de acrescentar novos índices.
 
+### 9.3. Reutilização entre solvers em 12/10/2026
+
+Comparação entre `f1a2b19` e a implementação com utilitários em `solver_utils.cpp`, usando o preset `profile`, mapa `den520d`, cenário `den520d-random-1` e 100 agentes. Cada solver foi executado três vezes por versão, alternando anterior e atual, em processos separados. Os valores são medianas de `durationSeconds`, sem o carregamento da instância e a serialização dos caminhos.
+
+| Solver | Anterior (s) | Atual (s) | Redução do tempo |
+| --- | ---: | ---: | ---: |
+| `PriorityPlanningSolver` | 2,807 | 0,685 | 75,6% |
+| `FullPathRepairIterativeSolver` | 1,446 | 1,250 | 13,6% |
+
+Todos os caminhos, sucesso, soma de custos e makespan coincidiram entre as versões e repetições de cada solver. Uma execução adicional por versão do reparo local também produziu caminhos idênticos; essa amostra isolada não permite concluir sobre seu desempenho. Os ganhos acima se referem somente ao cenário medido.
+
+As compilações `normal` e `profile` passaram. Não foram criados nem executados testes de regressão nesta alteração; os testes existentes receberam somente ajustes de includes e namespace para acompanhar a extração dos utilitários. O programa temporário de medição, os binários anterior/atual e `summary.json` ficaram em `/tmp/mapf-shared-solvers-benchmark`.
+
 ## 10. Alternativas e melhorias posteriores
 
 | Abordagem | Decisão e cuidados |
@@ -297,7 +317,7 @@ Esses casos mostram a redução de reconstruções, mas favorecem reparos pequen
 | Contadores ou proprietários adicionais por aresta | Não são obrigatórios: a interseção dos conjuntos temporais preserva os movimentos restantes. Um índice próprio pode ser avaliado se essa consulta dominar o custo. |
 | Índice espacial adicional | Adiado. Pode acelerar `hasOtherAgent`, mas exige manter a participação enquanto restar alguma visita do agente à célula. |
 
-- TODO: Medir e reduzir a cópia global por tentativa usando uma visão local ou estrutura equivalente, preservando publicação consistente e isolamento de falhas.
+- TODO: Medir o custo das cópias de entradas afetadas em regiões muito disputadas, preservando publicação consistente e isolamento de falhas.
 - TODO: Evitar regenerar vetores quando a ocupação efetiva não mudar, sem deixar de atualizar seus proprietários.
 - TODO: Avaliar diferenças entre caminhos por célula **e tempo absoluto**, preservando trechos realmente inalterados e cobrindo deslocamentos da cauda.
 - TODO: Compartilhar a geração de intervalos com o construtor independente do SIPP para reduzir duplicação das regras.

@@ -1,0 +1,79 @@
+#pragma once
+
+#include "mapf/core/instance.hpp"
+#include "mapf/solvers/local_path_repair_solver.hpp"
+
+#include <chrono>
+#include <cstddef>
+#include <list>
+#include <memory>
+#include <optional>
+#include <vector>
+
+namespace mapf::solver_utils {
+
+    PathReservationState buildReservationState(
+        Grid& grid,
+        const std::vector<Agent>& agents,
+        const std::vector<std::list<Cell*>>& paths,
+        std::optional<std::size_t> excludedPathIndex = std::nullopt
+    );
+
+    // Complete paths start at time zero. Removal requires the registered path;
+    // replacement insertion requires its prior removal. On allocation failure,
+    // the caller must restore a transaction or discard this state.
+    void repairSafeIntervalTable(
+        PathReservationState& state, const std::list<Cell*>& oldPath, int agentId
+    );
+
+    void updateReservationState(
+        PathReservationState& state, const std::list<Cell*>& newPath, int agentId
+    );
+
+    // One transaction may cover several agents. Only touched entries are saved.
+    // Failure/exception restores original map nodes without allocation.
+    // Explicitly rollback before returning a result that owns the state.
+    class ReservationTransaction {
+    public:
+        explicit ReservationTransaction(PathReservationState& state);
+        ~ReservationTransaction();
+        ReservationTransaction(const ReservationTransaction&) = delete;
+        ReservationTransaction& operator=(const ReservationTransaction&) = delete;
+
+        void removePath(const std::list<Cell*>& path, int agentId);
+        void insertPath(const std::list<Cell*>& path, int agentId);
+        void rollback() noexcept;
+        void commit() noexcept;
+
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> impl;
+    };
+
+    // Saves only replaced paths, transferring list nodes instead of copying.
+    // Keep the vector size fixed until commit/rollback. Restore before computing
+    // failure metrics or returning a result that owns the paths.
+    class PathTransaction {
+    public:
+        explicit PathTransaction(std::vector<std::list<Cell*>>& paths);
+        ~PathTransaction();
+        PathTransaction(const PathTransaction&) = delete;
+        PathTransaction& operator=(const PathTransaction&) = delete;
+
+        void replacePath(std::size_t index, std::list<Cell*>&& replacement);
+        void rollback() noexcept;
+        void commit() noexcept;
+
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> impl;
+    };
+
+    void updateResultMetrics(
+        LocalPathRepairResult& result,
+        const std::vector<Agent>& agents,
+        bool requestedSuccess,
+        std::chrono::steady_clock::time_point startedAt
+    );
+
+}

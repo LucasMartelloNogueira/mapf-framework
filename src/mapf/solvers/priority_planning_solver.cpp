@@ -1,5 +1,6 @@
 #include "mapf/solvers/priority_planning_solver.hpp"
 
+#include "solver_utils.hpp"
 #include "mapf/pathfinding/a_star.hpp"
 #include "mapf/pathfinding/a_star_sipp.hpp"
 #include "mapf/utils.hpp"
@@ -148,14 +149,14 @@ namespace mapf {
             }
         }
 
-        if (!allInitialPathsExist) {
-            result = summarize(false, initialPaths, paths, startedAt);
+        if (!allInitialPathsExist || agents.empty()) {
+            result = summarize(allInitialPathsExist, initialPaths, paths, startedAt);
             return result;
         }
 
         AStarSippSolver sippSolver;
-        std::vector<std::list<Cell*>> reservedPaths;
-        reservedPaths.reserve(agents.size());
+        // Only already planned agents reserve space; initial A* paths do not.
+        auto reservations = solver_utils::buildReservationState(grid, agents, paths);
 
         for (int agentIndex : agentsOrder) {
             const Agent& agent = agents[agentIndex];
@@ -172,15 +173,17 @@ namespace mapf {
                 grid,
                 start,
                 goal,
-                reservedPaths
+                reservations.safeIntervalTable,
+                0,
+                AStarSippSolver::GoalOccupation::Permanent
             );
             if (path.empty()) {
                 result = summarize(false, initialPaths, paths, startedAt);
                 return result;
             }
 
-            paths[agentIndex] = path;
-            reservedPaths.push_back(std::move(path));
+            solver_utils::updateReservationState(reservations, path, agent.id);
+            paths[agentIndex] = std::move(path);
         }
 
         result = summarize(true, initialPaths, paths, startedAt);

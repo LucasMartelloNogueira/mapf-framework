@@ -1,4 +1,5 @@
 #include "local_path_repair_solver_common.hpp"
+#include "solver_utils.hpp"
 #include "mapf/solvers/local_path_repair_iterative_solver.hpp"
 #include "mapf/solvers/local_path_repair_parallel_solver.hpp"
 #include "mapf/utils.hpp"
@@ -15,7 +16,7 @@
 
 namespace {
     using namespace mapf;
-    using namespace mapf::local_path_repair_detail;
+    using namespace mapf::solver_utils;
     using Paths = std::vector<std::list<Cell*>>;
 
     Agent agent(int id, Cell* start, Cell* goal) {
@@ -129,7 +130,8 @@ namespace {
 
 int main() {
     using namespace mapf;
-    using namespace mapf::local_path_repair_detail;
+    using namespace mapf::solver_utils;
+    using mapf::local_path_repair_detail::repairInitialPaths;
     constexpr int infinity = SAFE_INTERVAL_INFINITY;
 
     // Shared vertices/movements survive one removal; reverse direction is independent.

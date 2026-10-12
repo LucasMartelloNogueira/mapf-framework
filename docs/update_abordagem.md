@@ -34,6 +34,8 @@ As estratégias disponíveis são:
 
 Depois da seleção, o solver abre uma `ReservationTransaction` sobre `result.reservations`. Antes de remover o caminho completo do agente ativo, ela guarda as entradas originais dos intervalos seguros, ocupações explícitas, arestas e destino que essa remoção pode alterar. Somente essas entradas são copiadas para uso durante a tentativa; o restante do mapa permanece no lugar. A remoção inclui as visitas explícitas do agente, sua contribuição aos bloqueios de arestas e sua reserva permanente de destino.
 
+A transação e as operações de reservas ficam em [`solver_utils.cpp`](../src/mapf/solvers/solver_utils.cpp), com declarações em `solver_utils.hpp`, compartilhadas com os demais solvers. `repairInitialPaths` continua responsável pela seleção do conflito e pela coordenação do reparo local.
+
 Todas as tentativas de ponte e o eventual fallback usam essa mesma tabela preparada. Os caminhos dos outros agentes permanecem fixos durante a tentativa. Antes de inserir o candidato, o registro é ampliado para incluir células, arestas e destino ainda não protegidos. Uma entrada compartilhada pelos caminhos antigo e novo é guardada apenas uma vez, com seu valor anterior ao reparo.
 
 Se a tentativa falhar ou uma operação lançar uma exceção, o registro remove as entradas provisórias e restaura os nós originais dos mapas. A restauração reutiliza os nós preservados, sem alocar memória; as tabelas não reduzem sua capacidade durante a transação. A confirmação ocorre depois de preparar o caminho e os conflitos. Nesse momento, apenas os valores antigos registrados são descartados, sem substituir ou liberar o estado completo das reservas.
@@ -214,6 +216,7 @@ As responsabilidades estão distribuídas assim:
 | Componente | Papel na abordagem atual |
 | --- | --- |
 | [`repairInitialPaths`](../src/mapf/solvers/local_path_repair_solver_common.cpp) | Seleciona conflitos, prepara reservas, busca pontes, concatena caminhos, tenta fallback e confirma o estado |
+| [`solver_utils.cpp`](../src/mapf/solvers/solver_utils.cpp) | Centraliza construção e atualização de reservas, transações de reservas/caminhos e métricas compartilhadas pelos solvers de reparo |
 | [`AStarSippSolver`](../src/mapf/pathfinding/a_star_sipp.cpp) | Planeja segmentos com instante inicial e política de ocupação do alvo explícitos |
 | [`UpdateSolutionConflictsV2`](../src/mapf/utils.cpp) | Reavalia os eventos afetados pelo novo caminho e pela mudança de ocupação permanente |
 | [`PathReservationState`](../include/mapf/solvers/local_path_repair_solver.hpp) | Representa visitas explícitas, destinos permanentes e restrições utilizadas pelo SIPP |

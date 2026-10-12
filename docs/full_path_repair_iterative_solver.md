@@ -43,17 +43,20 @@ retain instance order. Scenario buckets have no role in priority.
 ## Reservation lifecycle
 
 The solver calls `buildReservationState` once after the initial searches.
-Each conflict attempt then uses one copy of the current reservations and one
-copy of the path vector:
+Each conflict attempt opens a `ReservationTransaction` on the current state
+and a `PathTransaction` on the current paths. Both utilities are implemented in
+[solver_utils.cpp](../src/mapf/solvers/solver_utils.cpp), with declarations in
+[solver_utils.hpp](../src/mapf/solvers/solver_utils.hpp):
 
 ```text
-copy committed paths and reservations
-remove every participant's old complete path with repairSafeIntervalTable
+open reservation and path transactions for the whole group
+save affected reservation entries and remove every participant's old complete path
 for each participant, in ascending ID order:
     run SIPP from the original start at time zero to the original goal
-    insert the new complete path with updateReservationState
-detect conflicts in the completed candidate
-validate and publish the whole group
+    save additional affected entries and insert the new complete path
+    swap the old path into the undo log and install the replacement
+detect conflicts in the temporarily updated paths
+validate and commit the whole group, or restore both transactions
 ```
 
 Before the first search, all group members have been removed. Each search
@@ -61,10 +64,12 @@ therefore sees unchanged paths of nonparticipants plus replacements already
 inserted for earlier group members. Even an unchanged replacement is inserted
 before the next search.
 
-The existing helpers preserve other owners' shared vertex and edge
+The shared helpers preserve other owners' shared vertex and edge
 contributions, update permanent goal reservations, and regenerate intervals
 only on affected cells. They receive whole paths with absolute times starting
-at zero, including waits and revisits.
+at zero, including waits and revisits. Only affected reservation entries are
+copied; original map nodes are retained for rollback. Path changes transfer
+list nodes through swaps, without copying the entire path vector or its lists.
 
 SIPP uses the existing supplied-table overload with
 `AStarSippSolver::GoalOccupation::Permanent`. A destination must remain safe
@@ -76,13 +81,16 @@ between searches. There is no full reservation rebuild in repair or rollback.
 The group is accepted only after all replacements exist, no global conflict
 involves a repaired participant, and the total event count strictly decreases.
 Conflicts solely among unchanged nonparticipants may remain for later groups.
-After acceptance, paths, conflicts, and reservations are published together
-using non-throwing moves, and selection uses the new conflict snapshot.
+After acceptance, the new conflict snapshot is moved into the result and both
+transactions are committed. These operations cannot throw. Selection then uses
+the new conflict snapshot.
 
-If one participant has no valid replacement, the entire temporary group is
-discarded and solving stops. The returned result retains all earlier committed
-groups and every old path from the failed group. Dependency exceptions
-propagate; a partially mutated disposable reservation copy is never reused.
+If one participant has no valid replacement or group validation fails, both
+transactions are explicitly rolled back before computing failure metrics and
+returning. This also protects builds without named return value optimization.
+The returned result retains all earlier committed groups and every old path
+from the failed group. Dependency exceptions propagate; transaction destructors
+restore the original paths and reservation entries without allocation.
 
 Every successful group removes an event without creating conflicts involving
 its participants, while outsiders' paths remain unchanged. The event count
@@ -119,11 +127,12 @@ exit codes.
 
 ## Cost and verification
 
-Full table reconstruction is limited to initialization. An attempt still
-copies all committed paths and the reservation state, updates every removed
-and inserted path, performs SIPP searches, and runs global conflict detection.
-Incremental interval updates do not imply that the complete attempt costs only
-the number of changed cells. No numerical speedup is assumed.
+Full table reconstruction is limited to initialization. An attempt saves only
+affected reservation entries and replaced paths, updates every removed and
+inserted path, performs SIPP searches, and runs global conflict detection.
+Shared cells may contain reservations from many agents, so saving their entries
+can still be expensive. Incremental interval updates do not imply that the
+complete attempt costs only the number of changed cells.
 
 The tests cover instance-order priority, complete-group removal, parked owners,
 multi-agent vertex/swap events, independent and overlapping conflicts,
@@ -151,5 +160,5 @@ Verification on 2026-10-02:
   Production call-site review confirmed one initial reservation build, complete
   group removal before SIPP, and insertion before each subsequent search.
 
-TODO: Profile state/path copies, SIPP, and global conflict detection before
-considering overlays or incremental collision indexes.
+TODO: Profile affected-entry copies, SIPP, and global conflict detection before
+considering further optimizations or incremental collision indexes.

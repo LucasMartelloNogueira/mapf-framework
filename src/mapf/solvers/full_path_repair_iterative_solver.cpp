@@ -1,6 +1,6 @@
 #include "mapf/solvers/full_path_repair_iterative_solver.hpp"
 
-#include "local_path_repair_solver_common.hpp"
+#include "solver_utils.hpp"
 #include "mapf/pathfinding/a_star.hpp"
 #include "mapf/pathfinding/a_star_sipp.hpp"
 #include "mapf/utils.hpp"
@@ -164,54 +164,54 @@ namespace mapf {
         result.paths = result.initialPaths;
         result.initialConflicts = getCollision(result.initialPaths);
         result.remainingConflicts = result.initialConflicts;
-        result.reservations = local_path_repair_detail::buildReservationState(grid, agents, result.paths);
+        result.reservations = solver_utils::buildReservationState(grid, agents, result.paths);
         if (!allInitialPathsExist) {
-            local_path_repair_detail::updateResultMetrics(result, agents, false, startedAt);
+            solver_utils::updateResultMetrics(result, agents, false, startedAt);
             return result;
         }
 
         AStarSippSolver sipp;
         while (!result.remainingConflicts.empty()) {
             const auto selected = selectConflict(result.remainingConflicts, agents.size());
-            auto candidatePaths = result.paths;
-            auto candidateReservations = result.reservations;
+            solver_utils::ReservationTransaction reservationChanges(result.reservations);
+            solver_utils::PathTransaction pathChanges(result.paths);
 
             // Exclude the complete group before searching for ANY replacement.
             for (std::size_t index : selected.participants) {
-                local_path_repair_detail::repairSafeIntervalTable(
-                    candidateReservations, result.paths[index], agents[index].id);
+                reservationChanges.removePath(result.paths[index], agents[index].id);
             }
             for (std::size_t index : selected.participants) {
                 Cell* start = grid.getCellPtr(agents[index].startPosition.x, agents[index].startPosition.y);
                 Cell* goal = grid.getCellPtr(agents[index].goalPosition.x, agents[index].goalPosition.y);
-                auto replacement = sipp.solve(grid, start, goal, candidateReservations.safeIntervalTable,
+                auto replacement = sipp.solve(grid, start, goal, result.reservations.safeIntervalTable,
                     0, AStarSippSolver::GoalOccupation::Permanent);
                 if (!validCompletePath(replacement, start, goal)) {
-                    local_path_repair_detail::updateResultMetrics(result, agents, false, startedAt);
+                    pathChanges.rollback();
+                    reservationChanges.rollback();
+                    solver_utils::updateResultMetrics(result, agents, false, startedAt);
                     return result;
                 }
-                local_path_repair_detail::updateReservationState(
-                    candidateReservations, replacement, agents[index].id);
-                candidatePaths[index] = std::move(replacement);
+                reservationChanges.insertPath(replacement, agents[index].id);
+                pathChanges.replacePath(index, std::move(replacement));
             }
             
             // TODO: não recalcular todos os conflitos, apenas retirar o conflito que excluido da lista de conflitos (result.remainingConflicts)
-            auto candidateConflicts = getCollision(candidatePaths);
+            auto candidateConflicts = getCollision(result.paths);
             if (hasParticipantConflict(candidateConflicts, selected.participants) ||
                 eventCount(candidateConflicts) >= eventCount(result.remainingConflicts)) {
-                local_path_repair_detail::updateResultMetrics(result, agents, false, startedAt);
+                pathChanges.rollback();
+                reservationChanges.rollback();
+                solver_utils::updateResultMetrics(result, agents, false, startedAt);
                 return result;
             }
 
             // Publish only a complete group, after all allocating work and validation.
-            static_assert(std::is_nothrow_move_assignable_v<decltype(result.paths)>);
             static_assert(std::is_nothrow_move_assignable_v<SolutionConflicts>);
-            static_assert(std::is_nothrow_move_assignable_v<PathReservationState>);
-            result.paths = std::move(candidatePaths);
             result.remainingConflicts = std::move(candidateConflicts);
-            result.reservations = std::move(candidateReservations);
+            pathChanges.commit();
+            reservationChanges.commit();
         }
-        local_path_repair_detail::updateResultMetrics(result, agents, true, startedAt);
+        solver_utils::updateResultMetrics(result, agents, true, startedAt);
         return result;
     }
 }

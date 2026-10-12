@@ -1,7 +1,7 @@
 #include "mapf/solvers/full_path_repair_iterative_solver.hpp"
 #include "mapf/pathfinding/a_star.hpp"
 #include "mapf/utils.hpp"
-#include "local_path_repair_solver_common.hpp"
+#include "solver_utils.hpp"
 #include "test_support.hpp"
 
 #include <algorithm>
@@ -110,7 +110,7 @@ namespace {
         requireSameConflicts(result.initialConflicts, getCollision(result.initialPaths));
         requireSameConflicts(result.remainingConflicts, getCollision(result.paths));
         requireSameState(result.reservations,
-            local_path_repair_detail::buildReservationState(grid, agents, result.paths));
+            solver_utils::buildReservationState(grid, agents, result.paths));
         requireTest(result.metrics.success == (complete && result.remainingConflicts.empty()), "Invalid success flag.");
 
         const auto repeated = solver.solve();

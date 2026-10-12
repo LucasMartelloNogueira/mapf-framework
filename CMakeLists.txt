@@ -38,6 +38,7 @@ add_library(mapf
     src/mapf/solvers/local_path_repair_parallel_solver.cpp
     src/mapf/solvers/local_path_repair_solver_common.cpp
     src/mapf/solvers/priority_planning_solver.cpp
+    src/mapf/solvers/solver_utils.cpp
 )
 
 target_include_directories(mapf
