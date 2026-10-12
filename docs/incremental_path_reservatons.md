@@ -116,9 +116,12 @@ construir result.reservations uma vez
 para cada tentativa efetiva de reparo:
     registrar entradas afetadas pelo caminho antigo
     remover o caminho completo do agente ativo do estado
-    executar buscas usando essa tabela estável
-    validar a estrutura do candidato completo
-    se rejeitado: restaurar as entradas registradas
+    tentar as âncoras usando essa tabela estável
+        validar a estrutura do candidato completo
+        rejeitar se checkNewConflictsQuantity retornar pelo menos 1
+        se rejeitado: tentar a próxima âncora
+    se todas falharem: buscar caminho completo e aplicar as mesmas validações
+    se o fallback falhar: restaurar as entradas registradas e retornar falha
     se aceito:
         proteger entradas adicionais e adicionar o novo caminho completo ao estado
         preparar as demais alterações que possam alocar memória

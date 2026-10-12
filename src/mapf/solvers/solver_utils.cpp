@@ -282,6 +282,24 @@ namespace mapf::solver_utils {
         }
     }
 
+    int checkNewConflictsQuantity(
+        const VertexOccupants& vertexOccupants, const std::list<Cell*>& newPath, int agentId
+    ) {
+        int numConflicts = 0;
+        int time = 0;
+        for (Cell* cell : newPath) {
+            const auto* occupants = occupantsAt(vertexOccupants, cell, time);
+            if (occupants != nullptr &&
+                std::any_of(occupants->begin(), occupants->end(), [agentId](int occupant) {
+                    return occupant != agentId;
+                })) {
+                ++numConflicts;
+            }
+            ++time;
+        }
+        return numConflicts;
+    }
+
     namespace {
         void removePathReservations(PathReservationState& state, const std::list<Cell*>& path,
             int agentId, ReservationUndoLog* undo);

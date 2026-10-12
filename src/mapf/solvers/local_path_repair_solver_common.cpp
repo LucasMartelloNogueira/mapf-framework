@@ -179,6 +179,12 @@ namespace mapf {
                         if (!structurallyValid(newPath, oldPath.front(), oldPath.back())) {
                             continue;
                         }
+                        // The bridge is safe, but its arrival time can shift the
+                        // preserved suffix into another agent's reservations.
+                        if (solver_utils::checkNewConflictsQuantity(
+                            result.reservations.vertex_agents, newPath, agents[activeIndex].id) >= 1) {
+                            continue;
+                        }
                         repairStartIndex = static_cast<int>(anchor);
                         repairSuccess = true;
                         break;
@@ -189,7 +195,9 @@ namespace mapf {
             if (!repairSuccess && !oldPath.empty()) {
                 newPath = sipp.solve(grid, oldPath.front(), oldPath.back(),
                     result.reservations.safeIntervalTable, 0, AStarSippSolver::GoalOccupation::Permanent);
-                if (structurallyValid(newPath, oldPath.front(), oldPath.back())) {
+                if (structurallyValid(newPath, oldPath.front(), oldPath.back()) &&
+                    solver_utils::checkNewConflictsQuantity(
+                        result.reservations.vertex_agents, newPath, agents[activeIndex].id) == 0) {
                     repairSuccess = true;
                     repairStartIndex = 0;
                 }

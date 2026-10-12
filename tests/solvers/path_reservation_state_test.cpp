@@ -1,5 +1,6 @@
 #include "local_path_repair_solver_common.hpp"
 #include "solver_utils.hpp"
+#include "mapf/pathfinding/a_star_sipp.hpp"
 #include "mapf/solvers/local_path_repair_iterative_solver.hpp"
 #include "mapf/solvers/local_path_repair_parallel_solver.hpp"
 #include "mapf/utils.hpp"
@@ -157,6 +158,32 @@ int main() {
     using namespace mapf::solver_utils;
     using mapf::local_path_repair_detail::repairInitialPaths;
     constexpr int infinity = SAFE_INTERVAL_INFINITY;
+
+    // Count cell/time events, not participants; ignore self and missing/empty
+    // entries. Waiting visits still advance time. The query must not allocate.
+    {
+        Grid grid(1, 5);
+        auto cell = [&](int x) { return grid.getCellPtr(x, 0); };
+        const VertexOccupants occupants {
+            {cell(0), {{0, {10}}}},
+            {cell(1), {{1, {10, 42, 99}}, {2, {42}}}},
+            {cell(2), {{9, {42}}}},
+            {cell(4), {{6, {}}}}
+        };
+        const std::list<Cell*> path {cell(0), cell(1), cell(1), cell(2), cell(3), cell(4), cell(4)};
+        const auto original = occupants;
+        allocation_test::remaining = 0;
+        const int count = checkNewConflictsQuantity(occupants, path, 10);
+        allocation_test::remaining = -1;
+        requireTest(count == 2, "Vertex conflict count must count each conflicting time only once.");
+        requireTest(checkNewConflictsQuantity(occupants, {cell(0)}, 10) == 0,
+            "The agent's own reservation counted as a conflict.");
+        requireTest(checkNewConflictsQuantity(occupants, {cell(0)}, 42) == 1,
+            "A different agent's reservation was ignored.");
+        requireTest(checkNewConflictsQuantity(occupants, {}, 10) == 0 &&
+            checkNewConflictsQuantity({}, path, 10) == 0, "Empty input reported conflicts.");
+        requireTest(occupants == original, "Conflict counting changed reservations.");
+    }
 
     // Transactions preserve unrelated occupants in a shared cell/time without
     // copying their containers, and restore nested nodes after group replacement.
@@ -426,6 +453,90 @@ int main() {
         } else {
             requireTest(iterative.remainingConflicts.vertexEvents.empty(), "The crossing was not repaired.");
         }
+    }
+
+    // The nearest anchor delays the suffix into a second crossing. An earlier
+    // anchor avoids both crossings and preserves the initial wait; a full
+    // replan would remove that wait, so the expected path distinguishes them.
+    for (auto strategy : {LocalRepairStrategy::RESOLVE_BY_AGENT, LocalRepairStrategy::RESOLVE_BY_TIME}) {
+        std::vector<std::vector<int>> freeCells(3, std::vector<int>(6, 1));
+        Grid coordinates(3, 6);
+        const std::vector<Agent> agents {
+            agent(10, coordinates.getCellPtr(0, 1), coordinates.getCellPtr(5, 1)),
+            agent(42, coordinates.getCellPtr(2, 0), coordinates.getCellPtr(2, 2)),
+            agent(91, coordinates.getCellPtr(4, 0), coordinates.getCellPtr(4, 2))
+        };
+        Instance instance(&freeCells, 3, 6, agents);
+        Grid& grid = instance.getGrid();
+        auto cell = [&](int x, int y) { return grid.getCellPtr(x, y); };
+        const Paths initialPaths {
+            {cell(0, 1), cell(0, 1), cell(1, 1), cell(1, 1), cell(2, 1), cell(3, 1), cell(4, 1), cell(5, 1)},
+            {cell(2, 0), cell(2, 0), cell(2, 0), cell(2, 0), cell(2, 1), cell(2, 2)},
+            {cell(4, 0), cell(4, 0), cell(4, 0), cell(4, 0), cell(4, 0), cell(4, 0), cell(4, 0), cell(4, 1), cell(4, 2)}
+        };
+        const auto others = buildReservationState(grid, instance.getAgents(), initialPaths, 0);
+        AStarSippSolver sipp;
+        std::list<Cell*> nearest {cell(0, 1), cell(0, 1), cell(1, 1)};
+        const auto bridge = sipp.solve(grid, cell(1, 1), cell(3, 1),
+            others.safeIntervalTable, 3, AStarSippSolver::GoalOccupation::Transient);
+        requireTest(!bridge.empty(), "Nearest-anchor fixture has no bridge.");
+        nearest.insert(nearest.end(), bridge.begin(), bridge.end());
+        nearest.insert(nearest.end(), {cell(4, 1), cell(5, 1)});
+        requireTest(checkNewConflictsQuantity(others.vertex_agents, nearest, instance.getAgents()[0].id) == 1,
+            "Nearest-anchor fixture must shift the suffix into a conflict.");
+
+        Paths expected = initialPaths;
+        expected[0] = {cell(0, 1), cell(0, 1), cell(1, 1), cell(2, 1), cell(3, 1), cell(4, 1), cell(5, 1)};
+        requireTest(validateSolution(expected), "Earlier-anchor fixture is not solvable.");
+        const auto result = repairInitialPaths(instance, initialPaths,
+            std::chrono::steady_clock::now(), strategy);
+        requireTest(result.metrics.success && result.paths == expected,
+            "Repair did not reject the nearest anchor and accept the earlier safe anchor.");
+        requireTest(result.initialPaths == initialPaths, "Anchor retries changed the initial paths.");
+        requireSameState(result.reservations, buildReservationState(grid, instance.getAgents(), result.paths));
+    }
+
+    // Both local anchors reconnect before an unsafe suffix. Exhausting them
+    // must discard that suffix and use the complete start-to-goal SIPP path.
+    for (auto strategy : {LocalRepairStrategy::RESOLVE_BY_AGENT, LocalRepairStrategy::RESOLVE_BY_TIME}) {
+        std::vector<std::vector<int>> freeCells(3, std::vector<int>(6, 1));
+        Grid coordinates(3, 6);
+        const std::vector<Agent> agents {
+            agent(10, coordinates.getCellPtr(0, 1), coordinates.getCellPtr(5, 1)),
+            agent(42, coordinates.getCellPtr(2, 0), coordinates.getCellPtr(2, 2)),
+            agent(91, coordinates.getCellPtr(4, 2), coordinates.getCellPtr(3, 0))
+        };
+        Instance instance(&freeCells, 3, 6, agents);
+        Grid& grid = instance.getGrid();
+        auto cell = [&](int x, int y) { return grid.getCellPtr(x, y); };
+        const Paths initialPaths {
+            {cell(0, 1), cell(1, 1), cell(2, 1), cell(3, 1), cell(4, 1), cell(4, 0), cell(5, 0), cell(5, 1)},
+            {cell(2, 0), cell(2, 0), cell(2, 1), cell(2, 2)},
+            {cell(4, 2), cell(4, 2), cell(4, 2), cell(4, 2), cell(4, 2), cell(4, 1), cell(3, 1), cell(3, 0)}
+        };
+        const auto others = buildReservationState(grid, instance.getAgents(), initialPaths, 0);
+        AStarSippSolver sipp;
+        for (int anchor : {1, 0}) {
+            std::list<Cell*> candidate;
+            if (anchor == 1) candidate.push_back(cell(0, 1));
+            const auto bridge = sipp.solve(grid, cell(anchor, 1), cell(3, 1),
+                others.safeIntervalTable, anchor, AStarSippSolver::GoalOccupation::Transient);
+            requireTest(!bridge.empty(), "Fallback fixture has no local bridge.");
+            candidate.insert(candidate.end(), bridge.begin(), bridge.end());
+            candidate.insert(candidate.end(), {cell(4, 1), cell(4, 0), cell(5, 0), cell(5, 1)});
+            requireTest(checkNewConflictsQuantity(others.vertex_agents, candidate, instance.getAgents()[0].id) >= 1,
+                "Every fallback fixture anchor must produce a vertex conflict.");
+        }
+        Paths expected = initialPaths;
+        expected[0] = sipp.solve(grid, cell(0, 1), cell(5, 1), others.safeIntervalTable,
+            0, AStarSippSolver::GoalOccupation::Permanent);
+        requireTest(validateSolution(expected), "Complete-replan fixture is not solvable.");
+        const auto result = repairInitialPaths(instance, initialPaths,
+            std::chrono::steady_clock::now(), strategy);
+        requireTest(result.metrics.success && result.paths == expected,
+            "Repair did not use the full replan after rejecting every local anchor.");
+        requireTest(result.initialPaths == initialPaths, "Full replan changed the initial paths.");
+        requireSameState(result.reservations, buildReservationState(grid, instance.getAgents(), result.paths));
     }
 
     // A collision at the first agent's goal requires a complete fallback.

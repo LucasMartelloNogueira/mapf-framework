@@ -48,7 +48,7 @@ startTime + n - 1
 
 Repeated cell pointers represent explicit waits. Reverse-edge reservations are indexed by arrival time and prevent opposite-direction swaps.
 
-The project uses stay-at-target semantics: every destination is reserved from arrival onward. Intermediate bridge endpoints use `GoalOccupation::Transient`. A bridge that ends the complete path, and the complete fallback, use `GoalOccupation::Permanent`. A copied suffix can still have conflicts, including future visits to its destination; these become repair records for later iterations.
+The project uses stay-at-target semantics: every destination is reserved from arrival onward. Intermediate bridge endpoints use `GoalOccupation::Transient`. A bridge that ends the complete path, and the complete fallback, use `GoalOccupation::Permanent`. A copied suffix is rejected if it intersects another agent's explicit vertex reservations. Conflicts outside that check, including edge swaps and implicit permanent occupancy, can still become repair records for later iterations.
 
 `AStarSippSolver` accepts an explicit policy when reusing a table:
 
@@ -122,8 +122,14 @@ a, floor(a / 2), floor(floor(a / 2) / 2), ..., 0
 
 The resulting path is the old prefix through the anchor, the bridge without
 its first cell, and the old suffix after the reconnection cell. Neither bridge
-endpoint is duplicated. The suffix is reused immediately at its shifted time;
-there is no separate suffix search or collision rejection before publishing it.
+endpoint is duplicated. Before accepting the assembled path,
+`solver_utils::checkNewConflictsQuantity` scans it from time zero against
+`vertex_agents`. It counts one conflict per cell/time containing any ID other
+than the active agent, regardless of the number of participants. Both inputs
+are passed by const reference, without copying paths or reservations. A count
+of at least one rejects the candidate and advances to the next anchor. This
+query covers explicit vertex occupancy only; it does not count edge swaps or
+implicit occupancy after another path ends.
 Structural checks preserve the endpoints, legal moves/waits and supported time
 range. There is no configuration history or repetition filter. Unusable local
 candidates lead to the next anchor or the complete fallback.
@@ -138,7 +144,7 @@ in global vertex events. Edge swaps use explicit movements only.
 
 ## Full Replanning And Failure
 
-If every local anchor fails, SIPP replans from the true source at time zero to the true destination while all other paths remain frozen. This search uses `GoalOccupation::Permanent`; its structurally valid replacement is published through the same incremental update, starting at index zero.
+If every local anchor fails, SIPP replans from the true source at time zero to the true destination while all other paths remain frozen. This search uses `GoalOccupation::Permanent`; its replacement must pass structural checks and the explicit vertex-conflict check before publication through the same incremental update, starting at index zero.
 
 Failure is returned when initial A* cannot reach a goal or both the local attempts and complete fallback fail. Shared starts and duplicate permanent goals are rejected during instance construction. Failed candidates never partially update committed paths or reservation structures.
 

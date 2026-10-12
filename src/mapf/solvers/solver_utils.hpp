@@ -12,6 +12,15 @@
 
 namespace mapf::solver_utils {
 
+    // Count explicit vertex conflicts from time zero, once per path cell/time,
+    // regardless of the number of other occupants. Does not count edge swaps or
+    // implicit occupancy after another path ends.
+    int checkNewConflictsQuantity(
+        const VertexOccupants& vertexOccupants,
+        const std::list<Cell*>& newPath,
+        int agentId
+    );
+
     PathReservationState buildReservationState(
         Grid& grid,
         const std::vector<Agent>& agents,
