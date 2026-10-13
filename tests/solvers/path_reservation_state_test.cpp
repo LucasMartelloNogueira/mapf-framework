@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <initializer_list>
+#include <iterator>
 #include <new>
 #include <random>
 #include <stdexcept>
@@ -493,7 +494,23 @@ int main() {
         requireTest(result.metrics.success && result.paths == expected,
             "Repair did not reject the nearest anchor and accept the earlier safe anchor.");
         requireTest(result.initialPaths == initialPaths, "Anchor retries changed the initial paths.");
+        requireTest(result.agentAnchorsIndex == std::vector<int>({1, -1, -1}),
+            "The second attempted anchor must be recorded as ordinal one.");
         requireSameState(result.reservations, buildReservationState(grid, instance.getAgents(), result.paths));
+
+        // Also block the second candidate's suffix. The last anchor is at path
+        // time zero, but its attempted ordinal is two, not zero.
+        Paths lastAnchorPaths = initialPaths;
+        *std::next(lastAnchorPaths[2].begin(), 5) = cell(4, 1);
+        Paths lastAnchorExpected = lastAnchorPaths;
+        lastAnchorExpected[0] = expected[0];
+        lastAnchorExpected[0].pop_front();
+        requireTest(validateSolution(lastAnchorExpected), "Last-anchor fixture is not solvable.");
+        const auto lastAnchorResult = repairInitialPaths(instance, lastAnchorPaths,
+            std::chrono::steady_clock::now(), strategy);
+        requireTest(lastAnchorResult.metrics.success && lastAnchorResult.paths == lastAnchorExpected &&
+            lastAnchorResult.agentAnchorsIndex == std::vector<int>({2, -1, -1}),
+            "The last anchor must record ordinal two, independently of its path time.");
     }
 
     // Both local anchors reconnect before an unsafe suffix. Exhausting them
@@ -536,6 +553,8 @@ int main() {
         requireTest(result.metrics.success && result.paths == expected,
             "Repair did not use the full replan after rejecting every local anchor.");
         requireTest(result.initialPaths == initialPaths, "Full replan changed the initial paths.");
+        requireTest(result.agentAnchorsIndex == std::vector<int>({-1, -1, -1}),
+            "Rejecting all local anchors must not record one for the full replan.");
         requireSameState(result.reservations, buildReservationState(grid, instance.getAgents(), result.paths));
     }
 
@@ -562,6 +581,8 @@ int main() {
             std::chrono::steady_clock::now(), strategy);
         requireTest(result.metrics.success && validateSolution(result.paths),
             "Complete fallback did not repair the goal conflict.");
+        requireTest(result.agentAnchorsIndex == std::vector<int>({-1, -1}),
+            "A full replan without a local reconnection must not record an anchor.");
         requireSameState(result.reservations, buildReservationState(grid, instance.getAgents(), result.paths));
     }
     return 0;

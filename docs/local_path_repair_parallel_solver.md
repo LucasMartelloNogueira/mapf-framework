@@ -26,6 +26,8 @@ A zero worker count throws `std::invalid_argument`. An instance with no agents r
 - aggregate `Result` metrics;
 - immutable unconstrained A* paths in `initialPaths`;
 - paths and path costs in `Instance::getAgents()` order;
+- `agentAnchorsIndex`, indexed by agent ID, with the zero-based ordinal of each
+  agent's last accepted local anchor (`-1` if none was accepted);
 - conflicts detected immediately after unconstrained A* planning;
 - conflicts remaining at return time; and
 - the safe intervals, blocked reverse-edge arrivals, vertex-to-agent membership, and permanent goal arrivals derived from the returned paths.
@@ -133,6 +135,12 @@ implicit occupancy after another path ends.
 Structural checks preserve the endpoints, legal moves/waits and supported time
 range. There is no configuration history or repetition filter. Unusable local
 candidates lead to the next anchor or the complete fallback.
+
+The anchor ordinal starts at zero for each repair attempt and advances for every
+candidate, including rejected candidates. Acceptance updates
+`agentAnchorsIndex[agentId]`; another accepted local repair replaces that value.
+Full replanning and failed attempts leave it unchanged. This ordinal is exported
+per agent in the `agentAnchorsIndex` column of the `_solution.csv` artifact.
 
 `UpdateSolutionConflictsV2` receives `SolutionConflicts&`, returns `void`, and updates affected events and agent records in place after insertion of the replacement reservations. If an allocation fails during that update, the solve throws and discards its local result; callers of the update API must also discard the partially updated conflict state.
 It removes obsolete events and discovers conflicts in the changed path, including

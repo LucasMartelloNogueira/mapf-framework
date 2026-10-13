@@ -185,19 +185,30 @@ int main() {
         );
         requireTest(
             readFile(solution).rfind(
-                "agent_id,agent_scenario_bucket,start,goal,optimum_path,solution_path,optimum_path_cost,solution_path_cost,success_optimum_path,success_solution_path\n",
+                "agent_id,agent_scenario_bucket,start,goal,optimum_path,solution_path,optimum_path_cost,solution_path_cost,success_optimum_path,success_solution_path,agentAnchorsIndex\n",
                 0
             ) == 0,
             "Solution header is incorrect."
         );
         requireTest(
             readFile(solution).find(
-                "0,-1,0-0,0-0,0-0,0-0,0,0,true,true"
+                std::string("0,-1,0-0,0-0,0-0,0-0,0,0,true,true,") + (local ? "-1\n" : "-\n")
             ) != std::string::npos,
             "Solution zero-cost serialization is incorrect."
         );
 
         std::filesystem::remove_all(directory);
+
+        // Reject misaligned ordinals and values below the unused sentinel.
+        const auto beforeInvalidAnchors = resultDirectories();
+        for (const auto& indices : {std::vector<int>{0, 1}, std::vector<int>{-2}}) {
+            auto invalid = run;
+            invalid.agentAnchorsIndex = indices;
+            requireTest(!mapf::experiments::writeExperimentArtifacts(instance, invalid, 0.5),
+                "Invalid anchor metadata was accepted.");
+        }
+        requireTest(resultDirectories() == beforeInvalidAnchors,
+            "Invalid anchor metadata created an artifact bundle.");
 
         // Scenario: normalized metadata claims two agents for a one-agent instance. Expected: the writer rejects the inconsistent count without creating a bundle.
         run.numAgents = 2;
@@ -225,6 +236,36 @@ int main() {
             }
             requireTest(resultDirectories() == beforeInvalidCount, "Invalid full-path metadata created artifacts.");
         }
+    }
+
+    // Ordinals are serialized by agent ID, including late, unused and first anchors.
+    {
+        std::vector<std::vector<int>> freeCells {{1, 1, 1}};
+        mapf::Instance instance(&freeCells, 1, 3, {
+            agent(10, 0, 0, 0, 0), agent(42, 1, 0, 1, 0), agent(91, 2, 0, 2, 0)});
+        auto& grid = instance.getGrid();
+        const std::vector<std::list<mapf::Cell*>> paths {
+            {grid.getCellPtr(0, 0)}, {grid.getCellPtr(1, 0)}, {grid.getCellPtr(2, 0)}};
+        mapf::experiments::ExperimentRunResult run {
+            .metrics = mapf::Result(true, 0, 0, 0.0, 0.1),
+            .initialPaths = paths,
+            .solutionPaths = paths,
+            .agentAnchorsIndex = {2, -1, 0},
+            .numAgents = 3,
+            .solver = "LocalPathRepairIterativeSolver",
+            .localRepair = true
+        };
+        const auto before = resultDirectories();
+        requireTest(mapf::experiments::writeExperimentArtifacts(instance, run, 0.2),
+            "Anchor metadata artifact write failed.");
+        const auto directory = onlyNewDirectory(before, resultDirectories());
+        const auto solution = readFile(directory / (directory.filename().string() + "_solution.csv"));
+        requireTest(solution.find(
+            "0,-1,0-0,0-0,0-0,0-0,0,0,true,true,2\n"
+            "1,-1,1-0,1-0,1-0,1-0,0,0,true,true,-1\n"
+            "2,-1,2-0,2-0,2-0,2-0,0,0,true,true,0\n") != std::string::npos,
+            "Anchor ordinals lost their values or agent alignment in the CSV.");
+        std::filesystem::remove_all(directory);
     }
 
     // Scenario: local repair fails without a geometric conflict because its only final path is missing. Expected: the run directory contains a header-only conflicts CSV.
@@ -282,9 +323,9 @@ int main() {
             "cell_1,cell_2,timestep,conflict_type,agents\n0-1,1-1,1,edge,2|3\n",
             "Failure artifacts retained a repaired conflict or used incorrect agent IDs.");
         const auto solution = readFile(directory / (prefix + "_solution.csv"));
-        requireTest(solution.find("1,-1,4-0,4-2,4-0|4-1|4-2,4-0|4-0|4-1|4-2,2,3,true,true\n") !=
+        requireTest(solution.find("1,-1,4-0,4-2,4-0|4-1|4-2,4-0|4-0|4-1|4-2,2,3,true,true,-\n") !=
             std::string::npos, "Committed waits or preserved initial paths were lost in the CSV.");
-        requireTest(solution.find("2,-1,0-1,1-1,0-1|1-1,0-1|1-1,1,1,true,false\n") != std::string::npos,
+        requireTest(solution.find("2,-1,0-1,1-1,0-1|1-1,0-1|1-1,1,1,true,false,-\n") != std::string::npos,
             "Uncommitted group paths leaked into the CSV.");
         const auto stats = readFile(directory / (prefix + "_stats.csv"));
         requireTest(stats.find("\n-,-,4,false,2,7,3,") != std::string::npos &&

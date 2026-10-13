@@ -37,6 +37,9 @@ namespace mapf {
         std::vector<std::list<Cell*>> initialPaths;
         std::vector<std::list<Cell*>> paths;
         std::vector<int> pathCosts;
+        // Indexed by agent ID. Zero-based ordinal of its last accepted local
+        // anchor; -1 if none was accepted. Full replanning does not change it.
+        std::vector<int> agentAnchorsIndex;
         SolutionConflicts initialConflicts;
         SolutionConflicts remainingConflicts;
         PathReservationState reservations;

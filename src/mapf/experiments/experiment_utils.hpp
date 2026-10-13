@@ -32,6 +32,8 @@ namespace mapf::experiments {
         Result metrics;
         std::vector<std::list<Cell*>> initialPaths;
         std::vector<std::list<Cell*>> solutionPaths;
+        // Empty when unavailable; otherwise one zero-based ordinal (or -1) per agent.
+        std::vector<int> agentAnchorsIndex;
         int numAgents = 0;
         std::string solver;
         bool multithreading = false;

@@ -118,6 +118,7 @@ namespace mapf {
         Grid& grid = const_cast<Grid&>(instance.getGrid());
 
         LocalPathRepairResult result;
+        result.agentAnchorsIndex.assign(agents.size(), -1);
         result.initialPaths = std::move(initialPaths);
         result.paths = result.initialPaths;
         result.initialConflicts = getCollision(result.initialPaths);
@@ -158,7 +159,10 @@ namespace mapf {
                     const auto goalOccupation = reconnectIndex + 1 == oldPath.size()
                         ? AStarSippSolver::GoalOccupation::Permanent
                         : AStarSippSolver::GoalOccupation::Transient;
+                    int anchorIndex = 0;
                     for (std::size_t anchor : adaptiveAnchors(static_cast<std::size_t>(time - 1))) {
+                        // Advance even when a rejected candidate uses continue.
+                        const int currentAnchorIndex = anchorIndex++;
                         const std::list<Cell*> bridge = sipp.solve(grid, oldPath[anchor],
                             oldPath[reconnectIndex], result.reservations.safeIntervalTable,
                             static_cast<int>(anchor), goalOccupation);
@@ -186,6 +190,7 @@ namespace mapf {
                             continue;
                         }
                         repairStartIndex = static_cast<int>(anchor);
+                        result.agentAnchorsIndex[agents[activeIndex].id] = currentAnchorIndex;
                         repairSuccess = true;
                         break;
                     }

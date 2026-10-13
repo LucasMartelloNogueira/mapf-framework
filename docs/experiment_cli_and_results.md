@@ -111,7 +111,7 @@ serialize those metrics, including for failed or partially solved runs.
 ## Solution Schema
 
 ```text
-agent_id,agent_scenario_bucket,start,goal,optimum_path,solution_path,optimum_path_cost,solution_path_cost,success_optimum_path,success_solution_path
+agent_id,agent_scenario_bucket,start,goal,optimum_path,solution_path,optimum_path_cost,solution_path_cost,success_optimum_path,success_solution_path,agentAnchorsIndex
 ```
 
 There is one row per instance agent in instance order. `agent_id` is the unique
@@ -126,6 +126,14 @@ cost `0`. A missing path is an empty CSV field with cost `-1`.
 `success_solution_path` means the final path exists and its agent appears in no
 final vertex or edge conflict. A present but conflicted path is retained for
 diagnosis with `success_solution_path=false`.
+
+`agentAnchorsIndex` is the zero-based position of the last accepted local anchor
+for that agent: `0` means the first attempt, `1` the second, and so on. It is
+recorded by both local-repair solvers and is not the anchor's path timestep.
+For the two local-repair solvers, the value is `-1` if no local anchor was accepted
+or anchor metadata is unavailable. All other solvers serialize `-` in this column.
+Full replanning does not count as a local anchor and does not overwrite
+a previously accepted local-anchor index.
 
 ## Conflict Schema
 

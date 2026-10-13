@@ -60,6 +60,9 @@ int main() {
 
         requireTest(iterativeResult.metrics.success, "Iterative crossing repair failed.");
         requireTest(parallelResult.metrics.success, "Parallel crossing repair failed.");
+        requireTest(iterativeResult.agentAnchorsIndex == std::vector<int>({0, -1}) &&
+            parallelResult.agentAnchorsIndex == iterativeResult.agentAnchorsIndex,
+            "Both adapters must record anchor zero only for the repaired agent.");
         for (const mapf::Result& metrics : {iterativeResult.metrics, parallelResult.metrics}) {
             requireTest(metrics.numInitialConflicts == 1 && metrics.numResolvedConflicts == 1 &&
                 metrics.numUnresolvedConflicts == 0, "Crossing conflict metrics are incorrect.");
@@ -96,6 +99,8 @@ int main() {
         mapf::LocalPathRepairResult result = solver.solve();
 
         requireTest(!result.metrics.success, "An unreachable initial path succeeded.");
+        requireTest(result.agentAnchorsIndex == std::vector<int>({-1, -1}),
+            "Missing initial paths must retain aligned, unused anchor entries.");
         requireTest(result.metrics.numInitialConflicts == 0 && result.metrics.numResolvedConflicts == 0 &&
             result.metrics.numUnresolvedConflicts == 0, "Missing initial path reported conflicts.");
         requireTest(result.initialPaths.size() == 2, "Initial paths are not aligned.");
@@ -120,6 +125,8 @@ int main() {
         mapf::LocalPathRepairResult result = solver.solve();
 
         requireTest(!result.metrics.success, "Impossible repair succeeded.");
+        requireTest(result.agentAnchorsIndex == std::vector<int>({-1, -1}),
+            "A failed local attempt must not record an accepted anchor.");
         requireTest(result.metrics.numInitialConflicts == 1 && result.metrics.numResolvedConflicts == 0 &&
             result.metrics.numUnresolvedConflicts == 1, "Failed repair conflict metrics are incorrect.");
         requireSamePaths(
@@ -176,7 +183,8 @@ int main() {
         requireTest(result.metrics.numInitialConflicts == 0 && result.metrics.numResolvedConflicts == 0 &&
             result.metrics.numUnresolvedConflicts == 0, "Empty instance reported conflicts.");
         requireTest(
-            result.initialPaths.empty() && result.paths.empty() && result.pathCosts.empty(),
+            result.initialPaths.empty() && result.paths.empty() && result.pathCosts.empty() &&
+                result.agentAnchorsIndex.empty(),
             "The empty iterative result contains path entries."
         );
     }

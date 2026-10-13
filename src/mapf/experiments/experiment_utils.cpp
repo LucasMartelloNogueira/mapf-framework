@@ -301,6 +301,9 @@ namespace mapf::experiments {
         if (
             run.initialPaths.size() != agents.size() ||
             run.solutionPaths.size() != agents.size() ||
+            (!run.agentAnchorsIndex.empty() && run.agentAnchorsIndex.size() != agents.size()) ||
+            std::any_of(run.agentAnchorsIndex.begin(), run.agentAnchorsIndex.end(),
+                [](int index) { return index < -1; }) ||
             run.numAgents < 0 ||
             static_cast<std::size_t>(run.numAgents) != agents.size() ||
             !supportedSolver(run.solver) ||
@@ -337,7 +340,8 @@ namespace mapf::experiments {
             "optimum_path_cost",
             "solution_path_cost",
             "success_optimum_path",
-            "success_solution_path"
+            "success_solution_path",
+            "agentAnchorsIndex"
         };
         std::vector<std::vector<std::string>> solutionRows;
         solutionRows.reserve(agents.size());
@@ -371,7 +375,10 @@ namespace mapf::experiments {
                 std::to_string(optimumPathCost),
                 std::to_string(solutionPathCost),
                 successOptimumPath ? "true" : "false",
-                successSolutionPath ? "true" : "false"
+                successSolutionPath ? "true" : "false",
+                run.localRepair
+                    ? std::to_string(run.agentAnchorsIndex.empty() ? -1 : run.agentAnchorsIndex[agent.id])
+                    : "-"
             });
         }
 
