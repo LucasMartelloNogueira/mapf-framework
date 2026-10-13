@@ -185,14 +185,14 @@ int main() {
         );
         requireTest(
             readFile(solution).rfind(
-                "agent_id,agent_scenario_bucket,start,goal,optimum_path,solution_path,optimum_path_cost,solution_path_cost,success_optimum_path,success_solution_path,agentAnchorsIndex\n",
+                "agent_id,agent_scenario_bucket,start,goal,optimum_path_cost,solution_path_cost,success_optimum_path,success_solution_path,agentAnchorsIndex,optimum_path,solution_path\n",
                 0
             ) == 0,
             "Solution header is incorrect."
         );
         requireTest(
             readFile(solution).find(
-                std::string("0,-1,0-0,0-0,0-0,0-0,0,0,true,true,") + (local ? "-1\n" : "-\n")
+                std::string("0,-1,0-0,0-0,0,0,true,true,") + (local ? "-1" : "-") + ",0-0,0-0\n"
             ) != std::string::npos,
             "Solution zero-cost serialization is incorrect."
         );
@@ -261,9 +261,9 @@ int main() {
         const auto directory = onlyNewDirectory(before, resultDirectories());
         const auto solution = readFile(directory / (directory.filename().string() + "_solution.csv"));
         requireTest(solution.find(
-            "0,-1,0-0,0-0,0-0,0-0,0,0,true,true,2\n"
-            "1,-1,1-0,1-0,1-0,1-0,0,0,true,true,-1\n"
-            "2,-1,2-0,2-0,2-0,2-0,0,0,true,true,0\n") != std::string::npos,
+            "0,-1,0-0,0-0,0,0,true,true,2,0-0,0-0\n"
+            "1,-1,1-0,1-0,0,0,true,true,-1,1-0,1-0\n"
+            "2,-1,2-0,2-0,0,0,true,true,0,2-0,2-0\n") != std::string::npos,
             "Anchor ordinals lost their values or agent alignment in the CSV.");
         std::filesystem::remove_all(directory);
     }
@@ -323,9 +323,9 @@ int main() {
             "cell_1,cell_2,timestep,conflict_type,agents\n0-1,1-1,1,edge,2|3\n",
             "Failure artifacts retained a repaired conflict or used incorrect agent IDs.");
         const auto solution = readFile(directory / (prefix + "_solution.csv"));
-        requireTest(solution.find("1,-1,4-0,4-2,4-0|4-1|4-2,4-0|4-0|4-1|4-2,2,3,true,true,-\n") !=
+        requireTest(solution.find("1,-1,4-0,4-2,2,3,true,true,-,4-0|4-1|4-2,4-0|4-0|4-1|4-2\n") !=
             std::string::npos, "Committed waits or preserved initial paths were lost in the CSV.");
-        requireTest(solution.find("2,-1,0-1,1-1,0-1|1-1,0-1|1-1,1,1,true,false,-\n") != std::string::npos,
+        requireTest(solution.find("2,-1,0-1,1-1,1,1,true,false,-,0-1|1-1,0-1|1-1\n") != std::string::npos,
             "Uncommitted group paths leaked into the CSV.");
         const auto stats = readFile(directory / (prefix + "_stats.csv"));
         requireTest(stats.find("\n-,-,4,false,2,7,3,") != std::string::npos &&

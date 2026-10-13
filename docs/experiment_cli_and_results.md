@@ -111,7 +111,7 @@ serialize those metrics, including for failed or partially solved runs.
 ## Solution Schema
 
 ```text
-agent_id,agent_scenario_bucket,start,goal,optimum_path,solution_path,optimum_path_cost,solution_path_cost,success_optimum_path,success_solution_path,agentAnchorsIndex
+agent_id,agent_scenario_bucket,start,goal,optimum_path_cost,solution_path_cost,success_optimum_path,success_solution_path,agentAnchorsIndex,optimum_path,solution_path
 ```
 
 There is one row per instance agent in instance order. `agent_id` is the unique

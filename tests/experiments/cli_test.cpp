@@ -113,8 +113,8 @@ namespace {
         requireTest(!std::filesystem::exists(directory / (prefix + "_conflicts.csv")),
             "Successful CLI run wrote a conflicts artifact.");
         const auto solution = readFile(directory / (prefix + "_solution.csv"));
-        requireTest(solution.find("success_solution_path,agentAnchorsIndex\n") != std::string::npos &&
-            solution.ends_with(localRepair ? ",true,true,-1\n" : ",true,true,-\n"),
+        requireTest(solution.find("success_solution_path,agentAnchorsIndex,optimum_path,solution_path\n") != std::string::npos &&
+            solution.find(localRepair ? ",true,true,-1," : ",true,true,-,") != std::string::npos,
             "Unused anchors must serialize as -1 for local repair and - for other solvers.");
         std::filesystem::remove_all(directory);
     }
@@ -183,8 +183,8 @@ int main() {
                 const auto runDirectory = findNewDirectory(before);
                 const auto solution = readFile(runDirectory / (runDirectory.filename().string() + "_solution.csv"));
                 requireTest(solution.find(
-                    "0,4,0-1,2-1,0-1|1-1|2-1,0-1|0-1|1-1|2-1,2,3,true,true,0\n"
-                    "1,4,1-0,1-2,1-0|1-1|1-2,1-0|1-1|1-2,2,2,true,true,-1\n") != std::string::npos,
+                    "0,4,0-1,2-1,2,3,true,true,0,0-1|1-1|2-1,0-1|0-1|1-1|2-1\n"
+                    "1,4,1-0,1-2,2,2,true,true,-1,1-0|1-1|1-2,1-0|1-1|1-2\n") != std::string::npos,
                     "CLI did not preserve accepted and unused anchor ordinals by agent.");
                 std::filesystem::remove_all(runDirectory);
             }
@@ -237,13 +237,13 @@ int main() {
                 conflicts.find("0-0,1-0,1,edge,0|1") != std::string::npos,
                 "Failed CLI run did not serialize its final edge conflict."
             );
+            const std::string unusedAnchor = solver == "LocalPathRepairIterativeSolver" ? "-1" : "-";
             requireTest(
-                solution.find(solver == "LocalPathRepairIterativeSolver"
-                    ? ",true,false,-1\n" : ",true,false,-\n") != std::string::npos,
+                solution.find(",true,false," + unusedAnchor + ",") != std::string::npos,
                 "A conflicted final path was not marked unsuccessful."
             );
-            requireTest(solution.find("0,3,0-0,1-0,0-0|1-0,0-0|1-0,1,1,true,false") != std::string::npos &&
-                solution.find("1,3,1-0,0-0,1-0|0-0,1-0|0-0,1,1,true,false") != std::string::npos,
+            requireTest(solution.find("0,3,0-0,1-0,1,1,true,false," + unusedAnchor + ",0-0|1-0,0-0|1-0\n") != std::string::npos &&
+                solution.find("1,3,1-0,0-0,1,1,true,false," + unusedAnchor + ",1-0|0-0,1-0|0-0\n") != std::string::npos,
                 "Failed group serialized a partial replacement.");
             std::filesystem::remove_all(runDirectory);
         }
@@ -275,8 +275,8 @@ int main() {
             } else {
                 requireTest(readFile(conflicts) == "cell_1,cell_2,timestep,conflict_type,agents\n",
                     "Missing-path failure must write a header-only conflicts file.");
-                requireTest(solution.find("0,7,0-0,2-0,,,-1,-1,false,false,-\n") != std::string::npos &&
-                    solution.find("1,7,2-0,3-0,2-0|3-0,2-0|3-0,1,1,true,true,-\n") != std::string::npos,
+                requireTest(solution.find("0,7,0-0,2-0,-1,-1,false,false,-,,\n") != std::string::npos &&
+                    solution.find("1,7,2-0,3-0,1,1,true,true,-,2-0|3-0,2-0|3-0\n") != std::string::npos,
                     "Missing and later reachable paths lost alignment.");
             }
             std::filesystem::remove_all(runDirectory);

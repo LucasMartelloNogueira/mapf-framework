@@ -335,13 +335,13 @@ namespace mapf::experiments {
             "agent_scenario_bucket",
             "start",
             "goal",
-            "optimum_path",
-            "solution_path",
             "optimum_path_cost",
             "solution_path_cost",
             "success_optimum_path",
             "success_solution_path",
-            "agentAnchorsIndex"
+            "agentAnchorsIndex",
+            "optimum_path",
+            "solution_path"
         };
         std::vector<std::vector<std::string>> solutionRows;
         solutionRows.reserve(agents.size());
@@ -370,15 +370,15 @@ namespace mapf::experiments {
                 std::to_string(agent.scenarioId),
                 formatPosition(agent.startPosition),
                 formatPosition(agent.goalPosition),
-                formatPath(initialPath),
-                formatPath(solutionPath),
                 std::to_string(optimumPathCost),
                 std::to_string(solutionPathCost),
                 successOptimumPath ? "true" : "false",
                 successSolutionPath ? "true" : "false",
                 run.localRepair
                     ? std::to_string(run.agentAnchorsIndex.empty() ? -1 : run.agentAnchorsIndex[agent.id])
-                    : "-"
+                    : "-",
+                formatPath(initialPath),
+                formatPath(solutionPath)
             });
         }
 
