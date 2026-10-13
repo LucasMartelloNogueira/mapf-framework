@@ -8,6 +8,7 @@ Uso:
   scripts/experiments.sh [normal|profile] [--dry-run]
 
 Executa a matriz de mapas, cenários, solvers, agentes e estratégias.
+LocalPathRepairParallelSolver executa cada combinação com 2, 4, 8 e 16 threads.
 O modo padrão é normal. Compile o executável correspondente antes de executar.
 
   --dry-run  Mostra todos os comandos, sem executar os solvers.
@@ -55,13 +56,15 @@ map_configs=(
 )
 solvers=(
     PriorityPlanningSolver
+    LocalPathRepairParallelSolver
     LocalPathRepairIterativeSolver
     FullPathRepairIterativeSolver
 )
 strategies=(RESOLVE_BY_AGENT RESOLVE_BY_TIME)
+thread_counts=(2 4 8 16)
 
-# Por mapa/agentes: 1 Priority + 2 Iterative + 1 Full.
-total_experiments=$(( ${#map_configs[@]} * 3 * (1 + ${#strategies[@]} + 1) ))
+# Por mapa/agentes: 1 Priority + estratégias × threads Parallel + estratégias Iterative + 1 Full.
+total_experiments=$(( ${#map_configs[@]} * 3 * (1 + ${#strategies[@]} * ${#thread_counts[@]} + ${#strategies[@]} + 1) ))
 
 if ! $dry_run && [[ ! -x build/$mode/mapf_app ]]; then
     echo "Erro: build/$mode/mapf_app não existe ou não é executável." >&2
@@ -103,7 +106,12 @@ for config in "${map_configs[@]}"; do
     for solver in "${solvers[@]}"; do
         # A opção vazia representa uma única execução sem essa flag.
         solver_strategies=("")
+        solver_threads=("")
         case "$solver" in
+            LocalPathRepairParallelSolver)
+                solver_strategies=("${strategies[@]}")
+                solver_threads=("${thread_counts[@]}")
+                ;;
             LocalPathRepairIterativeSolver)
                 solver_strategies=("${strategies[@]}")
                 ;;
@@ -111,34 +119,39 @@ for config in "${map_configs[@]}"; do
 
         for agents in "$first_count" "$second_count" "$third_count"; do
             for strategy in "${solver_strategies[@]}"; do
-                command=(scripts/run_experiment.sh "$mode" --
-                    -map "$map" -scen "$scenario" -solver "$solver" -agents "$agents")
-                if [[ -n $strategy ]]; then
-                    command+=(-localRepairStrategy "$strategy")
-                fi
+                for threads in "${solver_threads[@]}"; do
+                    command=(scripts/run_experiment.sh "$mode" --
+                        -map "$map" -scen "$scenario" -solver "$solver" -agents "$agents")
+                    if [[ -n $strategy ]]; then
+                        command+=(-localRepairStrategy "$strategy")
+                    fi
+                    if [[ -n $threads ]]; then
+                        command+=(-threads "$threads")
+                    fi
 
-                current=$((current + 1))
-                printf '\n[%d/%d] ' "$current" "$total_experiments"
-                printf '%q ' "${command[@]}"
-                printf '\n'
-                if $dry_run; then
-                    continue
-                fi
+                    current=$((current + 1))
+                    printf '\n[%d/%d] ' "$current" "$total_experiments"
+                    printf '%q ' "${command[@]}"
+                    printf '\n'
+                    if $dry_run; then
+                        continue
+                    fi
 
-                if "${command[@]}"; then
-                    exit_code=0
-                else
-                    exit_code=$?
-                fi
-                case "$exit_code" in
-                    0) succeeded=$((succeeded + 1)); echo "Resultado: sucesso." ;;
-                    1)
-                        unsuccessful=$((unsuccessful + 1))
-                        echo "Resultado: sem solução ou falha na gravação dos artefatos (código 1)."
-                        ;;
-                    130|143) exit "$exit_code" ;;
-                    *) errors=$((errors + 1)); echo "Resultado: erro (código $exit_code)." ;;
-                esac
+                    if "${command[@]}"; then
+                        exit_code=0
+                    else
+                        exit_code=$?
+                    fi
+                    case "$exit_code" in
+                        0) succeeded=$((succeeded + 1)); echo "Resultado: sucesso." ;;
+                        1)
+                            unsuccessful=$((unsuccessful + 1))
+                            echo "Resultado: sem solução ou falha na gravação dos artefatos (código 1)."
+                            ;;
+                        130|143) exit "$exit_code" ;;
+                        *) errors=$((errors + 1)); echo "Resultado: erro (código $exit_code)." ;;
+                    esac
+                done
             done
         done
     done
