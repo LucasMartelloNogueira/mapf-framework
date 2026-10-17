@@ -17,6 +17,10 @@ namespace mapf {
         RESOLVE_BY_TIME
     };
 
+    inline constexpr int AGENT_PATH_UNCHANGED = -1;
+    inline constexpr int AGENT_FULL_REPLAN = -2;
+    inline constexpr int AGENT_REPAIR_FAILED = -3;
+
     // Occupants are Agent::id values, equal to path indexes for instance agents.
     using VertexOccupants = std::unordered_map<Cell*,
         std::unordered_map<int, std::unordered_set<int>>>;
@@ -37,8 +41,9 @@ namespace mapf {
         std::vector<std::list<Cell*>> initialPaths;
         std::vector<std::list<Cell*>> paths;
         std::vector<int> pathCosts;
-        // Indexed by agent ID. Zero-based ordinal of its last accepted local
-        // anchor; -1 if none was accepted. Full replanning does not change it.
+        // Indexed by agent ID. Nonnegative values are zero-based ordinals of
+        // accepted local anchors. Negative values describe an unchanged path,
+        // an accepted full replan, or a failed repair using the constants above.
         std::vector<int> agentAnchorsIndex;
         SolutionConflicts initialConflicts;
         SolutionConflicts remainingConflicts;

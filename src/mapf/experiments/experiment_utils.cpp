@@ -303,7 +303,7 @@ namespace mapf::experiments {
             run.solutionPaths.size() != agents.size() ||
             (!run.agentAnchorsIndex.empty() && run.agentAnchorsIndex.size() != agents.size()) ||
             std::any_of(run.agentAnchorsIndex.begin(), run.agentAnchorsIndex.end(),
-                [](int index) { return index < -1; }) ||
+                [](int index) { return index < AGENT_REPAIR_FAILED; }) ||
             run.numAgents < 0 ||
             static_cast<std::size_t>(run.numAgents) != agents.size() ||
             !supportedSolver(run.solver) ||

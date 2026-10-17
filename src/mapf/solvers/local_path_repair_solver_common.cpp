@@ -118,7 +118,7 @@ namespace mapf {
         Grid& grid = const_cast<Grid&>(instance.getGrid());
 
         LocalPathRepairResult result;
-        result.agentAnchorsIndex.assign(agents.size(), -1);
+        result.agentAnchorsIndex.assign(agents.size(), AGENT_PATH_UNCHANGED);
         result.initialPaths = std::move(initialPaths);
         result.paths = result.initialPaths;
         result.initialConflicts = getCollision(result.initialPaths);
@@ -144,13 +144,15 @@ namespace mapf {
             }
 
             const std::size_t activeIndex = selected->pathIndex;
+            const int activeAgentId = agents[activeIndex].id;
             const std::vector<Cell*> oldPath(result.paths[activeIndex].begin(), result.paths[activeIndex].end());
             solver_utils::ReservationTransaction repair(result.reservations);
-            repair.removePath(result.paths[activeIndex], agents[activeIndex].id);
+            repair.removePath(result.paths[activeIndex], activeAgentId);
 
             std::list<Cell*> newPath;
             bool repairSuccess = false;
             int repairStartIndex = 0;
+            int repairOutcome = AGENT_REPAIR_FAILED;
             const int time = conflictTime(selected->conflict);
             if (time > 0 && static_cast<std::size_t>(time) < oldPath.size()) {
                 const std::size_t reconnectIndex = static_cast<std::size_t>(time) +
@@ -186,11 +188,11 @@ namespace mapf {
                         // The bridge is safe, but its arrival time can shift the
                         // preserved suffix into another agent's reservations.
                         if (solver_utils::checkNewConflictsQuantity(
-                            result.reservations.vertex_agents, newPath, agents[activeIndex].id) >= 1) {
+                            result.reservations.vertex_agents, newPath, activeAgentId) >= 1) {
                             continue;
                         }
                         repairStartIndex = static_cast<int>(anchor);
-                        result.agentAnchorsIndex[agents[activeIndex].id] = currentAnchorIndex;
+                        repairOutcome = currentAnchorIndex;
                         repairSuccess = true;
                         break;
                     }
@@ -202,20 +204,22 @@ namespace mapf {
                     result.reservations.safeIntervalTable, 0, AStarSippSolver::GoalOccupation::Permanent);
                 if (structurallyValid(newPath, oldPath.front(), oldPath.back()) &&
                     solver_utils::checkNewConflictsQuantity(
-                        result.reservations.vertex_agents, newPath, agents[activeIndex].id) == 0) {
+                        result.reservations.vertex_agents, newPath, activeAgentId) == 0) {
                     repairSuccess = true;
                     repairStartIndex = 0;
+                    repairOutcome = AGENT_FULL_REPLAN;
                 }
             }
             if (!repairSuccess) {
                 // Restore before returning: result may be moved before local
                 // destructors run when named return value optimization is absent.
                 repair.rollback();
+                result.agentAnchorsIndex[activeAgentId] = AGENT_REPAIR_FAILED;
                 solver_utils::updateResultMetrics(result, agents, false, startedAt);
                 return result;
             }
 
-            repair.insertPath(newPath, agents[activeIndex].id);
+            repair.insertPath(newPath, activeAgentId);
 
             UpdateSolutionConflictsV2(
                 newPath, result.reservations, result.remainingConflicts,
@@ -225,6 +229,7 @@ namespace mapf {
             static_assert(std::is_nothrow_move_assignable_v<decltype(newPath)>);
             result.paths[activeIndex] = std::move(newPath);
             repair.commit();
+            result.agentAnchorsIndex[activeAgentId] = repairOutcome;
         }
 
         solver_utils::updateResultMetrics(result, agents, true, startedAt);

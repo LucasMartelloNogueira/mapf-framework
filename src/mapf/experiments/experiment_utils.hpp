@@ -32,7 +32,8 @@ namespace mapf::experiments {
         Result metrics;
         std::vector<std::list<Cell*>> initialPaths;
         std::vector<std::list<Cell*>> solutionPaths;
-        // Empty when unavailable; otherwise one zero-based ordinal (or -1) per agent.
+        // Empty when unavailable; otherwise one local-anchor ordinal or
+        // AGENT_PATH_UNCHANGED / AGENT_FULL_REPLAN / AGENT_REPAIR_FAILED per agent.
         std::vector<int> agentAnchorsIndex;
         int numAgents = 0;
         std::string solver;
