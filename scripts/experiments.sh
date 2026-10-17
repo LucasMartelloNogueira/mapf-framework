@@ -97,6 +97,7 @@ succeeded=0
 unsuccessful=0
 errors=0
 printf 'Total: %d experimentos; modo: %s; dry-run: %s\n' "$total_experiments" "$mode" "$dry_run"
+experiment_start_seconds=$SECONDS
 
 for config in "${map_configs[@]}"; do
     read -r map_name first_count second_count third_count <<< "$config"
@@ -162,8 +163,10 @@ if $dry_run; then
     exit 0
 fi
 
+elapsed_seconds=$((SECONDS - experiment_start_seconds))
 printf '\nBateria concluída: %d execuções; %d sucessos; %d retornos 1; %d erros.\n' \
     "$current" "$succeeded" "$unsuccessful" "$errors"
+printf 'Tempo total: %d segundos.\n' "$elapsed_seconds"
 if (( errors > 0 )); then
     exit 2
 fi
