@@ -178,14 +178,104 @@ results/{git_branch}_{timestamp}/
 └── {git_branch}_{timestamp}_conflicts.csv
 ```
 
-O arquivo de conflitos existe quando um solver de reparo local ou o
-`FullPathRepairIterativeSolver` termina sem sucesso. Pode conter apenas o cabeçalho
-quando a falha decorre de um caminho ausente. Resultados parciais continuam
-disponíveis nos CSVs de estatísticas e solução. O reparo completo registra
-`local_repair_strategy=-` e uma thread.
+Os arquivos `_stats.csv` e `_solution.csv` são gerados sempre que o solver retorna
+e o conjunto de artefatos pode ser gravado. O `_conflicts.csv` é gerado somente
+quando um solver de reparo local ou o `FullPathRepairIterativeSolver` termina sem
+sucesso. Nesse caso, ele pode conter apenas o cabeçalho se a falha tiver sido
+causada por um caminho inexistente, sem um conflito geométrico para registrar.
+Resultados parciais permanecem disponíveis nos outros dois arquivos.
 
-Os schemas, códigos de saída, convenções de custo e comportamento em falhas
-estão detalhados em [`docs/experiment_cli_and_results.md`](docs/experiment_cli_and_results.md).
+### Convenções dos arquivos
+
+- Posições e células usam o formato `x-y`, por exemplo, `12-7`.
+- Caminhos usam o formato `x-y|x-y|...`. Células consecutivas repetidas
+  representam uma ação de espera.
+- O custo de um caminho é o número de ações, isto é, `quantidade_de_células - 1`.
+  Portanto, um caminho no qual origem e destino são iguais tem custo `0`.
+- Um caminho inexistente é representado por um campo vazio e tem custo `-1`.
+- Valores booleanos são serializados como `true` ou `false`.
+- Tempos em segundos são escritos com seis casas decimais.
+
+### `_stats.csv`: dados gerais do experimento
+
+Esse arquivo possui uma linha com os parâmetros usados, informações gerais da
+instância e métricas globais do resultado. Ele permite comparar execuções sem
+examinar os caminhos individuais.
+
+```text
+map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts
+```
+
+| Coluna | Significado |
+| --- | --- |
+| `map` | Nome do arquivo de mapa usado no experimento, incluindo sua extensão. |
+| `instance_name` | Nome do arquivo de cenário que originou a instância, incluindo sua extensão. |
+| `num_agents` | Quantidade de agentes solicitada por `-agents` e presente na instância. |
+| `success` | Resultado global: `true` quando o solver concluiu com um caminho final para todos os agentes e nenhum conflito restante; `false` quando faltou algum caminho, restou algum conflito ou o processo de resolução falhou. |
+| `paths_resolved` | Quantidade de agentes que possuem caminho final não vazio e não participam de nenhum conflito final. Pode ser menor que `num_agents` em resultados parciais. |
+| `sumOfCosts` | Soma dos custos de todos os caminhos finais disponíveis. Caminhos vazios não contribuem; caminhos existentes ainda contribuem quando permanecem conflitantes em uma execução sem sucesso. |
+| `makespan` | Maior custo entre os caminhos finais disponíveis, ou `0` quando nenhum caminho final existe. Também considera caminhos conflitantes preservados para diagnóstico. |
+| `injustice` | Desvio-padrão populacional dos acréscimos de custo `solution_path_cost - optimum_path_cost`, considerando somente agentes que possuem os dois caminhos. Mede quão desigualmente o custo adicional foi distribuído; vale `0.0` quando nenhum agente possui ambos os caminhos ou quando todos tiveram o mesmo acréscimo. |
+| `durationSeconds` | Tempo, em segundos, gasto dentro da chamada do solver, incluindo a construção dos caminhos iniciais realizada por ele. |
+| `time` | Tempo total, em segundos, desde o início do carregamento/construção da instância até o retorno do solver. Não inclui a serialização dos CSVs. |
+| `multithreading` | `true` somente para `LocalPathRepairParallelSolver`; `false` para os solvers sequenciais. |
+| `num_threads` | Número de workers configurado para `LocalPathRepairParallelSolver`; vale `1` para os solvers sequenciais. |
+| `solver` | Solver executado. Valores: `PriorityPlanningSolver`, planejamento sequencial por prioridade; `LocalPathRepairParallelSolver`, caminhos iniciais em paralelo seguidos de reparo local; `LocalPathRepairIterativeSolver`, caminhos iniciais sequenciais seguidos de reparo local; `FullPathRepairIterativeSolver`, replanejamento sequencial dos caminhos completos envolvidos nos conflitos. |
+| `local_repair_strategy` | Estratégia dos solvers de reparo local. `RESOLVE_BY_AGENT` seleciona conflitos priorizando a ordem dos agentes; `RESOLVE_BY_TIME` seleciona primeiro o conflito de menor instante; `-` indica que o solver não usa reparo local. |
+| `num_inital_conflicts` | Quantidade de eventos de conflito, de vértice ou de aresta, detectados nos caminhos iniciais. O nome da coluna contém `inital` por compatibilidade com o schema atual. |
+| `num_resolved_conflicts` | Quantidade de conflitos iniciais que deixaram de permanecer no resultado, calculada como `max(num_inital_conflicts - num_unresolved_conflicts, 0)`. |
+| `num_unresolved_conflicts` | Quantidade de eventos de conflito ainda presentes nos caminhos finais. São os mesmos eventos detalhados no `_conflicts.csv`, quando esse arquivo é gerado. |
+
+### `_solution.csv`: resultado por agente
+
+Esse arquivo representa a saída da instância MAPF. Há uma linha por agente, na
+ordem da instância, com origem, destino, caminho individual inicial, caminho
+final e indicadores que permitem interpretar soluções completas ou parciais.
+
+```text
+agent_id,agent_scenario_bucket,start,goal,optimum_path_cost,solution_path_cost,success_optimum_path,success_solution_path,agentAnchorsIndex,optimum_path,solution_path
+```
+
+| Coluna | Significado |
+| --- | --- |
+| `agent_id` | Identificador único do agente dentro do experimento. Os IDs são normalizados de `0` a `num_agents - 1` e também correspondem à posição do agente na instância. |
+| `agent_scenario_bucket` | Bucket informado no primeiro campo da linha do cenário Moving AI. Ele identifica o grupo do caso no arquivo de cenário, pode se repetir entre agentes e vale `-1` para agentes criados manualmente. |
+| `start` | Posição inicial do agente no formato `x-y`. |
+| `goal` | Posição de destino do agente no formato `x-y`. |
+| `optimum_path_cost` | Custo do caminho individual inicial encontrado por A* sem considerar os demais agentes. Vale `-1` quando esse caminho não existe. |
+| `solution_path_cost` | Custo do caminho final retornado para o agente. Vale `-1` quando nenhum caminho final existe. Um caminho presente pode ter custo válido mesmo se ainda estiver em conflito. |
+| `success_optimum_path` | `true` quando o A* encontrou o caminho individual inicial; `false` quando `optimum_path` está vazio. |
+| `success_solution_path` | `true` quando o caminho final existe e o agente não participa de nenhum conflito final; `false` quando o caminho está ausente ou ainda conflita. Esse valor é individual e pode ser `true` mesmo quando `success` no `_stats.csv` é `false` por causa de outro agente. |
+| `agentAnchorsIndex` | Resultado da tentativa de reparo mais recente nos dois solvers locais. Valores não negativos são o ordinal da âncora local aceita: `0` é a primeira âncora tentada, `1` é a segunda e assim por diante; o número não é o timestep da âncora. `-1` significa que o agente não teve seu caminho alterado pelo reparo; `-2` significa que as tentativas locais não produziram um caminho aceito e o replanejamento completo foi usado com sucesso; `-3` significa que tanto o reparo por âncoras quanto o replanejamento completo falharam. Os demais solvers registram `-`, pois não produzem esse metadado. |
+| `optimum_path` | Caminho individual inicial calculado por A*, no formato `x-y\|x-y\|...`, sem considerar conflitos com outros agentes. Fica vazio quando nenhum caminho foi encontrado. |
+| `solution_path` | Último caminho confirmado para o agente, no mesmo formato. Em uma execução sem sucesso, pode ficar vazio ou conter um caminho preservado que ainda participa de conflitos. |
+
+### `_conflicts.csv`: conflitos não resolvidos
+
+Esse arquivo serve para diagnosticar os conflitos que permanecem nos caminhos
+finais de uma execução sem sucesso. Cada linha representa um evento de conflito,
+e não um par separado para cada combinação de agentes. Os IDs de todos os
+participantes do mesmo evento são agrupados na coluna `agents`.
+
+```text
+cell_1,cell_2,timestep,conflict_type,agents
+```
+
+| Coluna | Significado |
+| --- | --- |
+| `cell_1` | Primeira célula do conflito, no formato `x-y`. Em conflitos de vértice, é a própria célula compartilhada. Em conflitos de aresta, é a primeira extremidade da aresta na ordenação canônica por coordenadas. |
+| `cell_2` | Segunda célula do conflito. Repete `cell_1` em conflitos de vértice; em conflitos de aresta, contém a segunda extremidade da aresta na ordenação canônica. As duas colunas não indicam a direção de movimento dos agentes. |
+| `timestep` | Instante discreto do conflito. Para `vertex`, é o instante em que os agentes ocupam a mesma célula; para `edge`, é o instante de chegada do movimento em sentidos opostos, correspondente à transição de `timestep - 1` para `timestep`. |
+| `conflict_type` | Tipo enumerado do conflito: `vertex` quando dois ou mais agentes ocupam a mesma célula no mesmo instante; `edge` quando agentes atravessam a mesma aresta em sentidos opostos no mesmo intervalo. |
+| `agents` | IDs de todos os agentes envolvidos no evento, ordenados de forma crescente e separados por `\|`, por exemplo, `0\|3\|7`. |
+
+A detecção considera que o agente permanece indefinidamente em sua célula de
+destino depois do fim do caminho. Portanto, uma visita posterior de outro agente
+a esse destino também pode gerar um conflito de vértice. Os registros são
+ordenados deterministicamente por `timestep`, tipo e células.
+
+Detalhes adicionais sobre os códigos de saída e o comportamento em falhas estão
+em [`docs/experiment_cli_and_results.md`](docs/experiment_cli_and_results.md).
 
 ## Executáveis de exemplo
 
