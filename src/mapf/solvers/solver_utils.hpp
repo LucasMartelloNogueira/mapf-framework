@@ -12,13 +12,19 @@
 
 namespace mapf::solver_utils {
 
-    // Count explicit vertex conflicts from time zero, once per path cell/time,
-    // regardless of the number of other occupants. Does not count edge swaps or
-    // implicit occupancy after another path ends.
-    int checkNewConflictsQuantity(
+    // Tests a complete path or a suffix beginning at absolute time t against
+    // reservations that exclude the active agent's old path. Vertex events are
+    // counted once per cell/time, edge swaps once per movement, and visits to
+    // the final cell after the candidate arrives are conflicts with its
+    // permanent goal occupation. Returns false as soon as maxNewConflict events
+    // have been found. Structural path validation remains the caller's duty.
+    bool canAcceptNewPath(
         const VertexOccupants& vertexOccupants,
+        const std::unordered_map<Cell*, GoalReservation>& goalReservations,
         const std::list<Cell*>& newPath,
-        int agentId
+        int agentId,
+        int t,
+        int maxNewConflict
     );
 
     PathReservationState buildReservationState(

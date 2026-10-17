@@ -118,9 +118,10 @@ para cada tentativa efetiva de reparo:
     remover o caminho completo do agente ativo do estado
     tentar as âncoras usando essa tabela estável
         validar a estrutura do candidato completo
-        rejeitar se checkNewConflictsQuantity retornar pelo menos 1
+        validar com canAcceptNewPath o sufixo a partir do tempo da âncora
+        rejeitar ao encontrar conflito de vértice, aresta ou ocupação permanente
         se rejeitado: tentar a próxima âncora
-    se todas falharem: buscar caminho completo e aplicar as mesmas validações
+    se todas falharem: buscar caminho completo e validar a partir do tempo zero
     se o fallback falhar: restaurar as entradas registradas e retornar falha
     se aceito:
         proteger entradas adicionais e adicionar o novo caminho completo ao estado

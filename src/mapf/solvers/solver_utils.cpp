@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -282,22 +283,102 @@ namespace mapf::solver_utils {
         }
     }
 
-    int checkNewConflictsQuantity(
-        const VertexOccupants& vertexOccupants, const std::list<Cell*>& newPath, int agentId
+    bool canAcceptNewPath(
+        const VertexOccupants& vertexOccupants,
+        const std::unordered_map<Cell*, GoalReservation>& goalReservations,
+        const std::list<Cell*>& newPath,
+        int agentId,
+        int t,
+        int maxNewConflict
     ) {
-        int numConflicts = 0;
-        int time = 0;
-        for (Cell* cell : newPath) {
-            const auto* occupants = occupantsAt(vertexOccupants, cell, time);
-            if (occupants != nullptr &&
+        if (t < 0) {
+            throw std::invalid_argument("Initial path time must be nonnegative.");
+        }
+        if (!newPath.empty() && newPath.size() - 1 >
+            static_cast<std::size_t>(std::numeric_limits<int>::max() - t)) {
+            throw std::invalid_argument("Path time is unrepresentable.");
+        }
+        if (maxNewConflict <= 0) {
+            return false;
+        }
+
+        const auto hasOtherAgent = [agentId](const std::unordered_set<int>* occupants) {
+            return occupants != nullptr &&
                 std::any_of(occupants->begin(), occupants->end(), [agentId](int occupant) {
                     return occupant != agentId;
-                })) {
-                ++numConflicts;
+                });
+        };
+        const auto hasReverseMovement = [&](Cell* from, Cell* to, int arrivalTime) {
+            if (from == to || arrivalTime <= 0) {
+                return false;
             }
-            ++time;
+            const auto* reverseStarts = occupantsAt(
+                vertexOccupants, to, arrivalTime - 1);
+            const auto* reverseArrives = occupantsAt(
+                vertexOccupants, from, arrivalTime);
+            if (reverseStarts == nullptr || reverseArrives == nullptr) {
+                return false;
+            }
+            if (reverseStarts->size() > reverseArrives->size()) {
+                std::swap(reverseStarts, reverseArrives);
+            }
+            return std::any_of(reverseStarts->begin(), reverseStarts->end(),
+                [&](int occupant) {
+                    return occupant != agentId && reverseArrives->contains(occupant);
+                });
+        };
+
+        int newConflicts = 0;
+        const auto reachesLimit = [&]() {
+            ++newConflicts;
+            return newConflicts >= maxNewConflict;
+        };
+
+        Cell* previous = nullptr;
+        std::size_t offset = 0;
+        for (Cell* cell : newPath) {
+            if (cell == nullptr) {
+                throw std::invalid_argument("Paths must not contain null cells.");
+            }
+            const int time = t + static_cast<int>(offset);
+
+            bool vertexConflict = hasOtherAgent(occupantsAt(vertexOccupants, cell, time));
+            const auto goal = goalReservations.find(cell);
+            if (goal != goalReservations.end() && goal->second.agentId != agentId &&
+                goal->second.arrivalTime <= time) {
+                vertexConflict = true;
+            }
+            if (vertexConflict && reachesLimit()) {
+                return false;
+            }
+            if (previous != nullptr && hasReverseMovement(previous, cell, time) && reachesLimit()) {
+                return false;
+            }
+
+            previous = cell;
+            ++offset;
         }
-        return numConflicts;
+
+        if (newPath.empty()) {
+            return true;
+        }
+
+        const int finalArrival = t + static_cast<int>(newPath.size() - 1);
+        Cell* finalCell = newPath.back();
+
+        // The candidate remains at its destination after its explicit path
+        // ends. Every later explicit visit by another agent creates one vertex
+        // event with that permanent occupation.
+        const auto finalVisits = vertexOccupants.find(finalCell);
+        if (finalVisits != vertexOccupants.end()) {
+            for (const auto& [visitTime, occupants] : finalVisits->second) {
+                if (visitTime > finalArrival && hasOtherAgent(&occupants) && reachesLimit()) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     namespace {

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <iterator>
 #include <variant>
 #include <optional>
 #include <stdexcept>
@@ -187,8 +188,13 @@ namespace mapf {
                         }
                         // The bridge is safe, but its arrival time can shift the
                         // preserved suffix into another agent's reservations.
-                        if (solver_utils::checkNewConflictsQuantity(
-                            result.reservations.vertex_agents, newPath, activeAgentId) >= 1) {
+                        const std::list<Cell*> pathFromAnchor(
+                            std::next(newPath.cbegin(), static_cast<std::ptrdiff_t>(anchor)),
+                            newPath.cend());
+                        if (!solver_utils::canAcceptNewPath(
+                            result.reservations.vertex_agents,
+                            result.reservations.goal_reservations,
+                            pathFromAnchor, activeAgentId, static_cast<int>(anchor), 1)) {
                             continue;
                         }
                         repairStartIndex = static_cast<int>(anchor);
@@ -203,8 +209,10 @@ namespace mapf {
                 newPath = sipp.solve(grid, oldPath.front(), oldPath.back(),
                     result.reservations.safeIntervalTable, 0, AStarSippSolver::GoalOccupation::Permanent);
                 if (structurallyValid(newPath, oldPath.front(), oldPath.back()) &&
-                    solver_utils::checkNewConflictsQuantity(
-                        result.reservations.vertex_agents, newPath, activeAgentId) == 0) {
+                    solver_utils::canAcceptNewPath(
+                        result.reservations.vertex_agents,
+                        result.reservations.goal_reservations,
+                        newPath, activeAgentId, 0, 1)) {
                     repairSuccess = true;
                     repairStartIndex = 0;
                     repairOutcome = AGENT_FULL_REPLAN;

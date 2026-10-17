@@ -160,29 +160,58 @@ int main() {
     using mapf::local_path_repair_detail::repairInitialPaths;
     constexpr int infinity = SAFE_INTERVAL_INFINITY;
 
-    // Count cell/time events, not participants; ignore self and missing/empty
-    // entries. Waiting visits still advance time. The query must not allocate.
+    // Candidate validation counts vertex events once per cell/time, edge swaps,
+    // parked goal owners and visits after the candidate reaches its permanent
+    // destination. A suffix uses its absolute anchor time and the query does
+    // not allocate.
     {
-        Grid grid(1, 5);
-        auto cell = [&](int x) { return grid.getCellPtr(x, 0); };
+        Grid grid(2, 6);
+        auto cell = [&](int x, int y = 0) { return grid.getCellPtr(x, y); };
         const VertexOccupants occupants {
-            {cell(0), {{0, {10}}}},
-            {cell(1), {{1, {10, 42, 99}}, {2, {42}}}},
-            {cell(2), {{9, {42}}}},
-            {cell(4), {{6, {}}}}
+            {cell(1), {{4, {42, 99}}}},
+            // Agent 42 moves 3,0 -> 2,0 from t=4 to t=5, opposite to
+            // the candidate's 2,0 -> 3,0 movement.
+            {cell(3), {{4, {42}}}},
+            {cell(2), {{5, {42}}}},
+            // A later visit conflicts with permanent occupation of cell 5.
+            {cell(5), {{9, {99}}}},
+            {cell(4, 1), {{7, {10}}}}
         };
-        const std::list<Cell*> path {cell(0), cell(1), cell(1), cell(2), cell(3), cell(4), cell(4)};
+        const std::unordered_map<Cell*, GoalReservation> goals {
+            {cell(4), {77, 6}}
+        };
+        const std::list<Cell*> suffix {cell(0), cell(1), cell(0)};
         const auto original = occupants;
+
+        requireTest(!canAcceptNewPath(occupants, goals, suffix, 10, 3, 1),
+            "The absolute suffix time did not detect its vertex conflict.");
+        requireTest(canAcceptNewPath(occupants, goals, suffix, 10, 0, 1),
+            "The suffix was incorrectly evaluated from a different absolute time.");
+
+        const std::list<Cell*> edgePath {cell(2), cell(3)};
+        requireTest(!canAcceptNewPath(occupants, {}, edgePath, 10, 4, 1),
+            "An opposite-direction edge swap was accepted.");
+        requireTest(canAcceptNewPath(occupants, {}, {cell(0), cell(0)}, 10, 4, 1),
+            "A wait was treated as an edge swap.");
+
+        requireTest(!canAcceptNewPath({}, goals, {cell(4)}, 10, 6, 1),
+            "A parked goal owner was ignored.");
+        requireTest(!canAcceptNewPath(occupants, {}, {cell(5)}, 10, 8, 1),
+            "A visit after permanent goal arrival was ignored.");
+        requireTest(canAcceptNewPath(occupants, {}, {cell(4, 1)}, 10, 7, 1),
+            "The active agent's own reservation counted as a conflict.");
+
+        const std::list<Cell*> allocationFreePath {cell(0), cell(1)};
         allocation_test::remaining = 0;
-        const int count = checkNewConflictsQuantity(occupants, path, 10);
+        const bool accepted = canAcceptNewPath(occupants, goals, allocationFreePath, 10, 3, 2);
         allocation_test::remaining = -1;
-        requireTest(count == 2, "Vertex conflict count must count each conflicting time only once.");
-        requireTest(checkNewConflictsQuantity(occupants, {cell(0)}, 10) == 0,
-            "The agent's own reservation counted as a conflict.");
-        requireTest(checkNewConflictsQuantity(occupants, {cell(0)}, 42) == 1,
-            "A different agent's reservation was ignored.");
-        requireTest(checkNewConflictsQuantity(occupants, {}, 10) == 0 &&
-            checkNewConflictsQuantity({}, path, 10) == 0, "Empty input reported conflicts.");
+        requireTest(accepted, "The conflict limit or allocation-free query is incorrect.");
+        requireTest(canAcceptNewPath({}, {}, {}, 10, 0, 1), "An empty suffix reported a conflict.");
+        requireTest(!canAcceptNewPath({}, {}, {}, 10, 0, 0),
+            "A zero conflict limit accepted a candidate.");
+        requireThrows<std::invalid_argument>([&] {
+            canAcceptNewPath({}, {}, suffix, 10, -1, 1);
+        });
         requireTest(occupants == original, "Conflict counting changed reservations.");
     }
 
@@ -483,7 +512,8 @@ int main() {
         requireTest(!bridge.empty(), "Nearest-anchor fixture has no bridge.");
         nearest.insert(nearest.end(), bridge.begin(), bridge.end());
         nearest.insert(nearest.end(), {cell(4, 1), cell(5, 1)});
-        requireTest(checkNewConflictsQuantity(others.vertex_agents, nearest, instance.getAgents()[0].id) == 1,
+        requireTest(!canAcceptNewPath(others.vertex_agents, others.goal_reservations,
+            nearest, instance.getAgents()[0].id, 0, 1),
             "Nearest-anchor fixture must shift the suffix into a conflict.");
 
         Paths expected = initialPaths;
@@ -541,7 +571,8 @@ int main() {
             requireTest(!bridge.empty(), "Fallback fixture has no local bridge.");
             candidate.insert(candidate.end(), bridge.begin(), bridge.end());
             candidate.insert(candidate.end(), {cell(4, 1), cell(4, 0), cell(5, 0), cell(5, 1)});
-            requireTest(checkNewConflictsQuantity(others.vertex_agents, candidate, instance.getAgents()[0].id) >= 1,
+            requireTest(!canAcceptNewPath(others.vertex_agents, others.goal_reservations,
+                candidate, instance.getAgents()[0].id, 0, 1),
                 "Every fallback fixture anchor must produce a vertex conflict.");
         }
         Paths expected = initialPaths;
