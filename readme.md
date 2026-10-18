@@ -38,7 +38,7 @@ solução de problemas estão em
 Formato geral:
 
 ```text
-scripts/run_experiment.sh <normal|profile> -- -map <mapa> -scen <cenario> -solver <solver> -agents <n> [-threads <t>] [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>]
+scripts/run_experiment.sh <normal|profile> -- -map <mapa> -scen <cenario> -solver <solver> -agents <n> [-threads <t>] [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>] [-maxNewConflicts <n>]
 ```
 
 ### Argumentos da CLI
@@ -56,12 +56,15 @@ argumentos opcionais, conforme as regras de cada solver.
 | `-agents` | Número de agentes usados no experimento. Para `k` agentes, lê os primeiros `k` agentes do arquivo indicado em `-scen`. | Obrigatório. Inteiro maior ou igual a `0`; o cenário deve conter pelo menos essa quantidade de agentes. |
 | `-threads` | Número de threads usadas para encontrar os caminhos iniciais em `LocalPathRepairParallelSolver`. | Inteiro maior que `0`. Obrigatório para `LocalPathRepairParallelSolver` e não aceito pelos outros solvers. |
 | `-localRepairStrategy` | Estratégia de resolução de conflitos no reparo local: `RESOLVE_BY_AGENT` prioriza a ordem dos agentes; `RESOLVE_BY_TIME` prioriza os conflitos pelo instante em que ocorrem. | `RESOLVE_BY_AGENT` ou `RESOLVE_BY_TIME`. Opcional, com padrão `RESOLVE_BY_AGENT`. Aceito somente por `LocalPathRepairParallelSolver` e `LocalPathRepairIterativeSolver`. |
+| `-maxNewConflicts` | Quantidade máxima de novos conflitos que um caminho gerado pelo reparo local pode introduzir e ainda ser aceito. | Inteiro maior ou igual a `0`. Opcional, com padrão `0`. Aceito somente por `LocalPathRepairParallelSolver` e `LocalPathRepairIterativeSolver`. |
 
 Nos solvers de reparo local, cada reparo combina o prefixo preservado, uma ponte
 SIPP e o restante do caminho antigo. Os conflitos do sufixo são atualizados para
-as próximas iterações. Se nenhuma ponte utilizável for encontrada, o solver tenta
-SIPP completo com permanência no destino. Se essa busca também falhar, retorna
-o último estado confirmado. Não há opção de continuar após uma falha.
+as próximas iterações. Um caminho candidato é aceito quando introduz no máximo
+`maxNewConflicts` conflitos novos; com o padrão `0`, somente candidatos sem novos
+conflitos são aceitos. Se nenhuma ponte utilizável for encontrada, o solver tenta
+SIPP completo com permanência no destino. Se essa busca também falhar, retorna o
+último estado confirmado. Não há opção de continuar após uma falha.
 
 O `FullPathRepairIterativeSolver` também tenta todos os caminhos iniciais com
 A*. Para cada conflito, retira as reservas de todos os participantes e recalcula
@@ -69,7 +72,7 @@ seus caminhos completos com SIPP em ordem crescente de ID, inserindo cada novo
 caminho antes da próxima busca. Se algum participante falhar, descarta as
 alterações daquele grupo e retorna o último estado confirmado. Usa uma única
 construção inicial da tabela de reservas e atualizações incrementais durante o
-reparo. Aceita somente os quatro argumentos obrigatórios; as duas flags opcionais
+reparo. Aceita somente os quatro argumentos obrigatórios; as três flags opcionais
 são rejeitadas mesmo quando recebem valores iguais aos padrões dos outros solvers.
 
 O script `scripts/run_experiment.sh` também recebe:
@@ -101,7 +104,8 @@ scripts/run_experiment.sh normal -- \
   -scen benchmarks/scenarios/den520d/random/den520d-random-1.scen \
   -solver LocalPathRepairParallelSolver \
   -agents 100 \
-  -threads 8
+  -threads 8 \
+  -maxNewConflicts 0
 ```
 
 Reparo local com caminhos iniciais calculados sequencialmente:
@@ -203,7 +207,7 @@ instância e métricas globais do resultado. Ele permite comparar execuções se
 examinar os caminhos individuais.
 
 ```text
-map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts
+map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,maxNewConflicts,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts
 ```
 
 | Coluna | Significado |
@@ -222,6 +226,7 @@ map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustic
 | `num_threads` | Número de workers configurado para `LocalPathRepairParallelSolver`; vale `1` para os solvers sequenciais. |
 | `solver` | Solver executado. Valores: `PriorityPlanningSolver`, planejamento sequencial por prioridade; `LocalPathRepairParallelSolver`, caminhos iniciais em paralelo seguidos de reparo local; `LocalPathRepairIterativeSolver`, caminhos iniciais sequenciais seguidos de reparo local; `FullPathRepairIterativeSolver`, replanejamento sequencial dos caminhos completos envolvidos nos conflitos. |
 | `local_repair_strategy` | Estratégia dos solvers de reparo local. `RESOLVE_BY_AGENT` seleciona conflitos priorizando a ordem dos agentes; `RESOLVE_BY_TIME` seleciona primeiro o conflito de menor instante; `-` indica que o solver não usa reparo local. |
+| `maxNewConflicts` | Valor efetivo de `-maxNewConflicts`. Nos dois solvers de reparo local, limita a quantidade de conflitos novos aceita por caminho candidato; vale `0` por padrão e também para os solvers que não aceitam a flag. |
 | `num_inital_conflicts` | Quantidade de eventos de conflito, de vértice ou de aresta, detectados nos caminhos iniciais. O nome da coluna contém `inital` por compatibilidade com o schema atual. |
 | `num_resolved_conflicts` | Quantidade de conflitos iniciais que deixaram de permanecer no resultado, calculada como `max(num_inital_conflicts - num_unresolved_conflicts, 0)`. |
 | `num_unresolved_conflicts` | Quantidade de eventos de conflito ainda presentes nos caminhos finais. São os mesmos eventos detalhados no `_conflicts.csv`, quando esse arquivo é gerado. |

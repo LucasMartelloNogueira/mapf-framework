@@ -16,15 +16,16 @@ namespace mapf::solver_utils {
     // reservations that exclude the active agent's old path. Vertex events are
     // counted once per cell/time, edge swaps once per movement, and visits to
     // the final cell after the candidate arrives are conflicts with its
-    // permanent goal occupation. Returns false as soon as maxNewConflict events
-    // have been found. Structural path validation remains the caller's duty.
+    // permanent goal occupation. Returns false as soon as more than
+    // maxNewConflicts events have been found. Structural path validation remains
+    // the caller's duty.
     bool canAcceptNewPath(
         const VertexOccupants& vertexOccupants,
         const std::unordered_map<Cell*, GoalReservation>& goalReservations,
         const std::list<Cell*>& newPath,
         int agentId,
         int t,
-        int maxNewConflict
+        int maxNewConflicts
     );
 
     PathReservationState buildReservationState(

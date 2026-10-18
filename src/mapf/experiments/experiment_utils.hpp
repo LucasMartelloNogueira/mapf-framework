@@ -41,6 +41,7 @@ namespace mapf::experiments {
         std::size_t numThreads = 1;
         bool localRepair = false;
         std::optional<LocalRepairStrategy> localRepairStrategy = std::nullopt;
+        int maxNewConflicts = 0;
     };
 
     struct ExperimentOutputPaths {

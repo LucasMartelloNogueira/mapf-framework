@@ -168,7 +168,7 @@ int main() {
         requireTest(!std::filesystem::exists(conflicts), "Successful run wrote conflicts.");
         requireTest(
             readFile(stats).rfind(
-                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts\n",
+                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,maxNewConflicts,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts\n",
                 0
             ) == 0,
             "Stats header is incorrect."
@@ -179,7 +179,7 @@ int main() {
         );
         requireTest(
             readFile(stats).find(
-                ",false,1," + solver + (local ? ",RESOLVE_BY_AGENT,0,0,0\n" : ",-,0,0,0\n")
+                ",false,1," + solver + (local ? ",RESOLVE_BY_AGENT,0,0,0,0\n" : ",-,0,0,0,0\n")
             ) != std::string::npos,
             "Stats solver metadata is incorrect."
         );
@@ -329,7 +329,7 @@ int main() {
             "Uncommitted group paths leaked into the CSV.");
         const auto stats = readFile(directory / (prefix + "_stats.csv"));
         requireTest(stats.find("\n-,-,4,false,2,7,3,") != std::string::npos &&
-            stats.find(",false,1,FullPathRepairIterativeSolver,-,2,1,1\n") != std::string::npos,
+            stats.find(",false,1,FullPathRepairIterativeSolver,-,0,2,1,1\n") != std::string::npos,
             "Partial full-path metrics or metadata differ.");
         std::filesystem::remove_all(directory);
     }

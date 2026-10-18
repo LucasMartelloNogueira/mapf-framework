@@ -289,7 +289,7 @@ namespace mapf::solver_utils {
         const std::list<Cell*>& newPath,
         int agentId,
         int t,
-        int maxNewConflict
+        int maxNewConflicts
     ) {
         if (t < 0) {
             throw std::invalid_argument("Initial path time must be nonnegative.");
@@ -298,7 +298,7 @@ namespace mapf::solver_utils {
             static_cast<std::size_t>(std::numeric_limits<int>::max() - t)) {
             throw std::invalid_argument("Path time is unrepresentable.");
         }
-        if (maxNewConflict <= 0) {
+        if (maxNewConflicts < 0) {
             return false;
         }
 
@@ -329,10 +329,6 @@ namespace mapf::solver_utils {
         };
 
         int newConflicts = 0;
-        const auto reachesLimit = [&]() {
-            ++newConflicts;
-            return newConflicts >= maxNewConflict;
-        };
 
         Cell* previous = nullptr;
         std::size_t offset = 0;
@@ -348,11 +344,17 @@ namespace mapf::solver_utils {
                 goal->second.arrivalTime <= time) {
                 vertexConflict = true;
             }
-            if (vertexConflict && reachesLimit()) {
-                return false;
+            if (vertexConflict) {
+                ++newConflicts;
+                if (newConflicts > maxNewConflicts) {
+                    return false;
+                }
             }
-            if (previous != nullptr && hasReverseMovement(previous, cell, time) && reachesLimit()) {
-                return false;
+            if (previous != nullptr && hasReverseMovement(previous, cell, time)) {
+                ++newConflicts;
+                if (newConflicts > maxNewConflicts) {
+                    return false;
+                }
             }
 
             previous = cell;
@@ -372,8 +374,11 @@ namespace mapf::solver_utils {
         const auto finalVisits = vertexOccupants.find(finalCell);
         if (finalVisits != vertexOccupants.end()) {
             for (const auto& [visitTime, occupants] : finalVisits->second) {
-                if (visitTime > finalArrival && hasOtherAgent(&occupants) && reachesLimit()) {
-                    return false;
+                if (visitTime > finalArrival && hasOtherAgent(&occupants)) {
+                    ++newConflicts;
+                    if (newConflicts > maxNewConflicts) {
+                        return false;
+                    }
                 }
             }
         }

@@ -93,7 +93,7 @@ namespace {
         );
         requireTest(
             stats.rfind(
-                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts\n",
+                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,maxNewConflicts,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts\n",
                 0
             ) == 0,
             "Stats header is incorrect."
@@ -106,7 +106,7 @@ namespace {
         requireTest(
             stats.find(
                 "," + solver + "," +
-                (localRepair ? "RESOLVE_BY_AGENT" : "-") + ",0,0,0\n"
+                (localRepair ? "RESOLVE_BY_AGENT" : "-") + ",0,0,0,0\n"
             ) != std::string::npos,
             solver + " metadata was not serialized from CLI options."
         );

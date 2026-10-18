@@ -183,20 +183,20 @@ int main() {
         const std::list<Cell*> suffix {cell(0), cell(1), cell(0)};
         const auto original = occupants;
 
-        requireTest(!canAcceptNewPath(occupants, goals, suffix, 10, 3, 1),
+        requireTest(!canAcceptNewPath(occupants, goals, suffix, 10, 3, 0),
             "The absolute suffix time did not detect its vertex conflict.");
         requireTest(canAcceptNewPath(occupants, goals, suffix, 10, 0, 1),
             "The suffix was incorrectly evaluated from a different absolute time.");
 
         const std::list<Cell*> edgePath {cell(2), cell(3)};
-        requireTest(!canAcceptNewPath(occupants, {}, edgePath, 10, 4, 1),
+        requireTest(!canAcceptNewPath(occupants, {}, edgePath, 10, 4, 0),
             "An opposite-direction edge swap was accepted.");
         requireTest(canAcceptNewPath(occupants, {}, {cell(0), cell(0)}, 10, 4, 1),
             "A wait was treated as an edge swap.");
 
-        requireTest(!canAcceptNewPath({}, goals, {cell(4)}, 10, 6, 1),
+        requireTest(!canAcceptNewPath({}, goals, {cell(4)}, 10, 6, 0),
             "A parked goal owner was ignored.");
-        requireTest(!canAcceptNewPath(occupants, {}, {cell(5)}, 10, 8, 1),
+        requireTest(!canAcceptNewPath(occupants, {}, {cell(5)}, 10, 8, 0),
             "A visit after permanent goal arrival was ignored.");
         requireTest(canAcceptNewPath(occupants, {}, {cell(4, 1)}, 10, 7, 1),
             "The active agent's own reservation counted as a conflict.");
@@ -207,8 +207,8 @@ int main() {
         allocation_test::remaining = -1;
         requireTest(accepted, "The conflict limit or allocation-free query is incorrect.");
         requireTest(canAcceptNewPath({}, {}, {}, 10, 0, 1), "An empty suffix reported a conflict.");
-        requireTest(!canAcceptNewPath({}, {}, {}, 10, 0, 0),
-            "A zero conflict limit accepted a candidate.");
+        requireTest(canAcceptNewPath({}, {}, {}, 10, 0, 0),
+            "A conflict-free candidate exceeded the zero conflict limit.");
         requireThrows<std::invalid_argument>([&] {
             canAcceptNewPath({}, {}, suffix, 10, -1, 1);
         });
@@ -513,7 +513,7 @@ int main() {
         nearest.insert(nearest.end(), bridge.begin(), bridge.end());
         nearest.insert(nearest.end(), {cell(4, 1), cell(5, 1)});
         requireTest(!canAcceptNewPath(others.vertex_agents, others.goal_reservations,
-            nearest, instance.getAgents()[0].id, 0, 1),
+            nearest, instance.getAgents()[0].id, 0, 0),
             "Nearest-anchor fixture must shift the suffix into a conflict.");
 
         Paths expected = initialPaths;
@@ -572,7 +572,7 @@ int main() {
             candidate.insert(candidate.end(), bridge.begin(), bridge.end());
             candidate.insert(candidate.end(), {cell(4, 1), cell(4, 0), cell(5, 0), cell(5, 1)});
             requireTest(!canAcceptNewPath(others.vertex_agents, others.goal_reservations,
-                candidate, instance.getAgents()[0].id, 0, 1),
+                candidate, instance.getAgents()[0].id, 0, 0),
                 "Every fallback fixture anchor must produce a vertex conflict.");
         }
         Paths expected = initialPaths;

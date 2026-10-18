@@ -171,11 +171,16 @@ namespace mapf::experiments {
         }
 
         bool validSolverMetadata(const ExperimentRunResult& run) {
+            if (run.maxNewConflicts < 0) {
+                return false;
+            }
+
             if (run.solver == "PriorityPlanningSolver" || run.solver == "FullPathRepairIterativeSolver") {
                 return
                     !run.multithreading &&
                     run.numThreads == 1 &&
-                    !run.localRepair && !run.localRepairStrategy;
+                    !run.localRepair && !run.localRepairStrategy &&
+                    run.maxNewConflicts == 0;
             }
 
             if (strategyName(run.localRepairStrategy.value_or(
@@ -397,6 +402,7 @@ namespace mapf::experiments {
             "num_threads",
             "solver",
             "local_repair_strategy",
+            "maxNewConflicts",
             "num_inital_conflicts",
             "num_resolved_conflicts",
             "num_unresolved_conflicts"
@@ -417,6 +423,7 @@ namespace mapf::experiments {
             run.solver,
             run.localRepair ? strategyName(run.localRepairStrategy.value_or(
                 LocalRepairStrategy::RESOLVE_BY_AGENT)) : "-",
+            std::to_string(run.maxNewConflicts),
             std::to_string(run.metrics.numInitialConflicts),
             std::to_string(run.metrics.numResolvedConflicts),
             std::to_string(run.metrics.numUnresolvedConflicts)

@@ -109,9 +109,13 @@ namespace mapf {
         const Instance& instance,
         std::vector<std::list<Cell*>> initialPaths,
         std::chrono::steady_clock::time_point startedAt,
-        LocalRepairStrategy localRepairStrategy
+        LocalRepairStrategy localRepairStrategy,
+        int maxNewConflicts
     ) {
         validateLocalRepairStrategy(localRepairStrategy);
+        if (maxNewConflicts < 0) {
+            throw std::invalid_argument("The maximum number of new conflicts must be nonnegative.");
+        }
         const std::vector<Agent>& agents = instance.getAgents();
         if (initialPaths.size() != agents.size()) {
             throw std::invalid_argument("Initial paths must be aligned with instance agents.");
@@ -194,7 +198,8 @@ namespace mapf {
                         if (!solver_utils::canAcceptNewPath(
                             result.reservations.vertex_agents,
                             result.reservations.goal_reservations,
-                            pathFromAnchor, activeAgentId, static_cast<int>(anchor), 1)) {
+                            pathFromAnchor, activeAgentId, static_cast<int>(anchor),
+                            maxNewConflicts)) {
                             continue;
                         }
                         repairStartIndex = static_cast<int>(anchor);
@@ -212,7 +217,7 @@ namespace mapf {
                     solver_utils::canAcceptNewPath(
                         result.reservations.vertex_agents,
                         result.reservations.goal_reservations,
-                        newPath, activeAgentId, 0, 1)) {
+                        newPath, activeAgentId, 0, maxNewConflicts)) {
                     repairSuccess = true;
                     repairStartIndex = 0;
                     repairOutcome = AGENT_FULL_REPLAN;

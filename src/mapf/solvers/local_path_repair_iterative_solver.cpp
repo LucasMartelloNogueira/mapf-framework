@@ -5,6 +5,7 @@
 #include "mapf/pathfinding/a_star.hpp"
 
 #include <chrono>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -12,11 +13,16 @@ namespace mapf {
 
     LocalPathRepairIterativeSolver::LocalPathRepairIterativeSolver(
         const Instance& instance,
-        LocalRepairStrategy localRepairStrategy
+        LocalRepairStrategy localRepairStrategy,
+        int maxNewConflicts
     ) :
         instance(instance),
-        localRepairStrategy(localRepairStrategy) {
+        localRepairStrategy(localRepairStrategy),
+        maxNewConflicts(maxNewConflicts) {
         local_path_repair_detail::validateLocalRepairStrategy(localRepairStrategy);
+        if (maxNewConflicts < 0) {
+            throw std::invalid_argument("The maximum number of new conflicts must be nonnegative.");
+        }
     }
 
     LocalPathRepairResult LocalPathRepairIterativeSolver::solve() {
@@ -42,7 +48,8 @@ namespace mapf {
                     instance,
                     std::move(initialPaths),
                     startedAt,
-                    localRepairStrategy
+                    localRepairStrategy,
+                    maxNewConflicts
                 );
             }
             initialPaths[i] = std::move(path);
@@ -52,7 +59,8 @@ namespace mapf {
             instance,
             std::move(initialPaths),
             startedAt,
-            localRepairStrategy
+            localRepairStrategy,
+            maxNewConflicts
         );
     }
 

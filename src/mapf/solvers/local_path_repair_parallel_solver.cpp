@@ -101,15 +101,20 @@ namespace mapf {
     LocalPathRepairParallelSolver::LocalPathRepairParallelSolver(
         const Instance& instance,
         std::size_t numberOfThreads,
-        LocalRepairStrategy localRepairStrategy
+        LocalRepairStrategy localRepairStrategy,
+        int maxNewConflicts
     ) :
         instance(instance),
         numberOfThreads(numberOfThreads),
-        localRepairStrategy(localRepairStrategy)
+        localRepairStrategy(localRepairStrategy),
+        maxNewConflicts(maxNewConflicts)
     {
         local_path_repair_detail::validateLocalRepairStrategy(localRepairStrategy);
         if (numberOfThreads == 0) {
             throw std::invalid_argument("The number of threads must be positive.");
+        }
+        if (maxNewConflicts < 0) {
+            throw std::invalid_argument("The maximum number of new conflicts must be nonnegative.");
         }
     }
 
@@ -149,7 +154,8 @@ namespace mapf {
             instance,
             std::move(initialPaths),
             startedAt,
-            localRepairStrategy
+            localRepairStrategy,
+            maxNewConflicts
         );
     }
 

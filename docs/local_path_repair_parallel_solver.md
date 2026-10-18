@@ -12,14 +12,14 @@ Include:
 #include "mapf/solvers/local_path_repair_parallel_solver.hpp"
 ```
 
-Construct the solver with an instance whose lifetime exceeds the solver's lifetime and a positive worker count:
+Construct the solver with an instance whose lifetime exceeds the solver's lifetime and a positive worker count. The strategy and maximum accepted new-conflict count are optional:
 
 ```cpp
 mapf::LocalPathRepairParallelSolver solver(instance, 4);
 mapf::LocalPathRepairResult result = solver.solve();
 ```
 
-A zero worker count throws `std::invalid_argument`. An instance with no agents returns a successful empty result.
+A zero worker count or negative conflict limit throws `std::invalid_argument`. An instance with no agents returns a successful empty result.
 
 `LocalPathRepairResult` contains:
 
@@ -50,7 +50,7 @@ startTime + n - 1
 
 Repeated cell pointers represent explicit waits. Reverse-edge reservations are indexed by arrival time and prevent opposite-direction swaps.
 
-The project uses stay-at-target semantics: every destination is reserved from arrival onward. Intermediate bridge endpoints use `GoalOccupation::Transient`. A bridge that ends the complete path, and the complete fallback, use `GoalOccupation::Permanent`. A copied suffix is rejected if it intersects another agent's explicit vertex reservations. Conflicts outside that check, including edge swaps and implicit permanent occupancy, can still become repair records for later iterations.
+The project uses stay-at-target semantics: every destination is reserved from arrival onward. Intermediate bridge endpoints use `GoalOccupation::Transient`. A bridge that ends the complete path, and the complete fallback, use `GoalOccupation::Permanent`. A copied suffix is checked against explicit vertex reservations, edge swaps, and permanent occupancy; it is accepted only while its conflict count remains within `maxNewConflicts`.
 
 `AStarSippSolver` accepts an explicit policy when reusing a table:
 
@@ -129,8 +129,9 @@ endpoint is duplicated. Before accepting the assembled path,
 absolute time. It checks explicit and permanent vertex occupancy, reverse-edge
 swaps, and later visits to the candidate's permanently occupied destination.
 Each vertex event is counted once regardless of its number of participants. A
-count reaching the supplied limit rejects the candidate and advances to the
-next anchor. The complete fallback is checked from time zero.
+count exceeding `maxNewConflicts` rejects the candidate and advances to the next
+anchor. The complete fallback is checked from time zero. The default `0` accepts
+only candidates without new conflicts.
 Structural checks preserve the endpoints, legal moves/waits and supported time
 range. There is no configuration history or repetition filter. Unusable local
 candidates lead to the next anchor or the complete fallback.
@@ -158,11 +159,13 @@ Failure is returned when initial A* cannot reach a goal or both the local attemp
 There is no continuation option. A failed local attempt followed by a failed
 complete fallback returns the last committed state immediately.
 
-Both solvers accept the repair strategy directly:
+Both solvers accept the repair strategy and conflict limit directly:
 
 ```cpp
-mapf::LocalPathRepairParallelSolver parallel(instance, 4, mapf::LocalRepairStrategy::RESOLVE_BY_TIME);
-mapf::LocalPathRepairIterativeSolver iterative(instance, mapf::LocalRepairStrategy::RESOLVE_BY_TIME);
+mapf::LocalPathRepairParallelSolver parallel(
+    instance, 4, mapf::LocalRepairStrategy::RESOLVE_BY_TIME, 2);
+mapf::LocalPathRepairIterativeSolver iterative(
+    instance, mapf::LocalRepairStrategy::RESOLVE_BY_TIME, 2);
 ```
 
 ## Metrics

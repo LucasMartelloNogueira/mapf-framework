@@ -15,7 +15,8 @@ namespace mapf::local_path_repair_detail {
         const Instance& instance,
         std::vector<std::list<Cell*>> initialPaths,
         std::chrono::steady_clock::time_point startedAt,
-        LocalRepairStrategy localRepairStrategy
+        LocalRepairStrategy localRepairStrategy,
+        int maxNewConflicts = 0
     );
 
 }

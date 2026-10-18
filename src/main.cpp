@@ -26,6 +26,8 @@ namespace {
         std::optional<std::size_t> threads;
         mapf::LocalRepairStrategy localRepairStrategy = mapf::LocalRepairStrategy::RESOLVE_BY_AGENT;
         bool localRepairStrategyProvided = false;
+        int maxNewConflicts = 0;
+        bool maxNewConflictsProvided = false;
     };
 
     void printUsage(std::ostream& output, const char* binary) {
@@ -33,8 +35,10 @@ namespace {
             << "Usage: " << binary
             << " -map <map> -scen <scenario> -solver <solver> -agents <n>"
             << " [-threads <t>]"
-            << " [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>]\n"
+            << " [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>]"
+            << " [-maxNewConflicts <n>]\n"
             << "Local repair strategy applies to local solvers; default: RESOLVE_BY_AGENT.\n"
+            << "Maximum accepted new conflicts applies to local solvers; default: 0.\n"
             << "Solvers: PriorityPlanningSolver, LocalPathRepairParallelSolver, "
             << "LocalPathRepairIterativeSolver, FullPathRepairIterativeSolver\n"
             << "FullPathRepairIterativeSolver uses fixed ID priority and accepts no optional flags.\n";
@@ -69,6 +73,7 @@ namespace {
         std::optional<std::string> agents;
         std::optional<std::string> threads;
         std::optional<std::string> localRepairStrategy;
+        std::optional<std::string> maxNewConflicts;
 
         for (int index = 1; index < argc; index += 2) {
             const std::string flag = argv[index];
@@ -91,6 +96,8 @@ namespace {
                 target = &threads;
             } else if (flag == "-localRepairStrategy") {
                 target = &localRepairStrategy;
+            } else if (flag == "-maxNewConflicts") {
+                target = &maxNewConflicts;
             } else {
                 throw std::invalid_argument("Unknown flag or positional argument '" + flag + "'.");
             }
@@ -129,6 +136,14 @@ namespace {
             options.localRepairStrategyProvided = true;
         }
 
+        if (maxNewConflicts) {
+            options.maxNewConflicts = parseInteger(*maxNewConflicts, "-maxNewConflicts");
+            if (options.maxNewConflicts < 0) {
+                throw std::invalid_argument("-maxNewConflicts must be non-negative.");
+            }
+            options.maxNewConflictsProvided = true;
+        }
+
         if (options.solver == "PriorityPlanningSolver") {
             if (options.localRepairStrategyProvided) {
                 throw std::invalid_argument(
@@ -137,6 +152,11 @@ namespace {
             if (options.threads) {
                 throw std::invalid_argument(
                     "-threads is not accepted by PriorityPlanningSolver."
+                );
+            }
+            if (options.maxNewConflictsProvided) {
+                throw std::invalid_argument(
+                    "-maxNewConflicts is not accepted by PriorityPlanningSolver."
                 );
             }
         } else if (options.solver == "LocalPathRepairParallelSolver") {
@@ -152,10 +172,11 @@ namespace {
                 );
             }
         } else if (options.solver == "FullPathRepairIterativeSolver") {
-            if (options.threads || options.localRepairStrategyProvided) {
+            if (options.threads || options.localRepairStrategyProvided ||
+                options.maxNewConflictsProvided) {
                 throw std::invalid_argument(
-                    "FullPathRepairIterativeSolver does not accept -threads "
-                    "or -localRepairStrategy.");
+                    "FullPathRepairIterativeSolver does not accept -threads, "
+                    "-localRepairStrategy, or -maxNewConflicts.");
             }
         } else {
             throw std::invalid_argument("Unknown solver '" + options.solver + "'.");
@@ -197,7 +218,8 @@ int runCli(int argc, char* argv[]) {
             mapf::LocalPathRepairParallelSolver solver(
                 instance,
                 options.threads.value(),
-                options.localRepairStrategy
+                options.localRepairStrategy,
+                options.maxNewConflicts
             );
             mapf::LocalPathRepairResult result = solver.solve();
             experimentTimeSeconds =
@@ -211,10 +233,12 @@ int runCli(int argc, char* argv[]) {
             run.numThreads = options.threads.value();
             run.localRepair = true;
             run.localRepairStrategy = options.localRepairStrategy;
+            run.maxNewConflicts = options.maxNewConflicts;
         } else if (options.solver == "LocalPathRepairIterativeSolver") {
             mapf::LocalPathRepairIterativeSolver solver(
                 instance,
-                options.localRepairStrategy
+                options.localRepairStrategy,
+                options.maxNewConflicts
             );
             mapf::LocalPathRepairResult result = solver.solve();
             experimentTimeSeconds =
@@ -228,6 +252,7 @@ int runCli(int argc, char* argv[]) {
             run.numThreads = 1;
             run.localRepair = true;
             run.localRepairStrategy = options.localRepairStrategy;
+            run.maxNewConflicts = options.maxNewConflicts;
         } else if (options.solver == "FullPathRepairIterativeSolver") {
             mapf::FullPathRepairIterativeSolver solver(instance);
             mapf::LocalPathRepairResult result = solver.solve();
