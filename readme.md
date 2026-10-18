@@ -66,6 +66,14 @@ conflitos são aceitos. Se nenhuma ponte utilizável for encontrada, o solver te
 SIPP completo com permanência no destino. Se essa busca também falhar, retorna o
 último estado confirmado. Não há opção de continuar após uma falha.
 
+Durante o reparo, os solvers locais mantêm um conjunto das configurações já
+confirmadas usando hashes de 128 bits. O hash de cada caminho diferencia célula,
+instante, repetições e tamanho; sua contribuição também inclui o ID do agente.
+Ao testar um novo caminho, o hash global é atualizado retirando a contribuição
+antiga daquele agente e inserindo a nova. Se o resultado já estiver no conjunto,
+o candidato é rejeitado e `sameConfigCounter` é incrementado, evitando retornar
+a uma configuração anterior sem recalcular os hashes dos outros agentes.
+
 O `FullPathRepairIterativeSolver` também tenta todos os caminhos iniciais com
 A*. Para cada conflito, retira as reservas de todos os participantes e recalcula
 seus caminhos completos com SIPP em ordem crescente de ID, inserindo cada novo
@@ -207,7 +215,7 @@ instância e métricas globais do resultado. Ele permite comparar execuções se
 examinar os caminhos individuais.
 
 ```text
-map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,maxNewConflicts,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts
+map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,maxNewConflicts,sameConfigCounter,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts
 ```
 
 | Coluna | Significado |
@@ -227,6 +235,7 @@ map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustic
 | `solver` | Solver executado. Valores: `PriorityPlanningSolver`, planejamento sequencial por prioridade; `LocalPathRepairParallelSolver`, caminhos iniciais em paralelo seguidos de reparo local; `LocalPathRepairIterativeSolver`, caminhos iniciais sequenciais seguidos de reparo local; `FullPathRepairIterativeSolver`, replanejamento sequencial dos caminhos completos envolvidos nos conflitos. |
 | `local_repair_strategy` | Estratégia dos solvers de reparo local. `RESOLVE_BY_AGENT` seleciona conflitos priorizando a ordem dos agentes; `RESOLVE_BY_TIME` seleciona primeiro o conflito de menor instante; `-` indica que o solver não usa reparo local. |
 | `maxNewConflicts` | Valor efetivo de `-maxNewConflicts`. Nos dois solvers de reparo local, limita a quantidade de conflitos novos aceita por caminho candidato; vale `0` por padrão e também para os solvers que não aceitam a flag. |
+| `sameConfigCounter` | Quantidade de candidatos rejeitados pelos solvers de reparo local porque seu hash de configuração de 128 bits já havia sido visitado. Vale `0` para os demais solvers. O hash inclui a célula, o instante e o tamanho de cada caminho, além da identidade do agente; após um reparo aceito, somente a contribuição do agente alterado é recalculada. |
 | `num_inital_conflicts` | Quantidade de eventos de conflito, de vértice ou de aresta, detectados nos caminhos iniciais. O nome da coluna contém `inital` por compatibilidade com o schema atual. |
 | `num_resolved_conflicts` | Quantidade de conflitos iniciais que deixaram de permanecer no resultado, calculada como `max(num_inital_conflicts - num_unresolved_conflicts, 0)`. |
 | `num_unresolved_conflicts` | Quantidade de eventos de conflito ainda presentes nos caminhos finais. São os mesmos eventos detalhados no `_conflicts.csv`, quando esse arquivo é gerado. |

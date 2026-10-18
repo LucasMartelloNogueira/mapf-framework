@@ -35,6 +35,8 @@ namespace mapf::experiments {
         // Empty when unavailable; otherwise one local-anchor ordinal or
         // AGENT_PATH_UNCHANGED / AGENT_FULL_REPLAN / AGENT_REPAIR_FAILED per agent.
         std::vector<int> agentAnchorsIndex;
+        // Repeated configurations rejected by local repair; zero when unavailable.
+        std::size_t sameConfigCounter = 0;
         int numAgents = 0;
         std::string solver;
         bool multithreading = false;

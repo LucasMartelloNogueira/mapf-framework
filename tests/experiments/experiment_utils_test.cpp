@@ -142,6 +142,7 @@ int main() {
             .metrics = mapf::Result(true, 0, 0, 0.0, 0.25),
             .initialPaths = {path},
             .solutionPaths = {path},
+            .sameConfigCounter = local ? 7U : 0U,
             .numAgents = 1,
             .solver = solver,
             .multithreading = false,
@@ -168,7 +169,7 @@ int main() {
         requireTest(!std::filesystem::exists(conflicts), "Successful run wrote conflicts.");
         requireTest(
             readFile(stats).rfind(
-                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,maxNewConflicts,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts\n",
+                "map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,maxNewConflicts,sameConfigCounter,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts\n",
                 0
             ) == 0,
             "Stats header is incorrect."
@@ -179,7 +180,7 @@ int main() {
         );
         requireTest(
             readFile(stats).find(
-                ",false,1," + solver + (local ? ",RESOLVE_BY_AGENT,0,0,0,0\n" : ",-,0,0,0,0\n")
+                ",false,1," + solver + (local ? ",RESOLVE_BY_AGENT,0,7,0,0,0\n" : ",-,0,0,0,0,0\n")
             ) != std::string::npos,
             "Stats solver metadata is incorrect."
         );
@@ -223,13 +224,14 @@ int main() {
         );
         if (!local) {
             run.numAgents = 1;
-            for (int field = 0; field < 4; ++field) {
+            for (int field = 0; field < 5; ++field) {
                 auto invalid = run;
                 switch (field) {
                 case 0: invalid.multithreading = true; break;
                 case 1: invalid.numThreads = 2; break;
                 case 2: invalid.localRepair = true; break;
                 case 3: invalid.localRepairStrategy = mapf::LocalRepairStrategy::RESOLVE_BY_AGENT; break;
+                case 4: invalid.sameConfigCounter = 1; break;
                 }
                 requireTest(!mapf::experiments::writeExperimentArtifacts(instance, invalid, 0.5),
                     "Full-path writer accepted inconsistent solver metadata.");

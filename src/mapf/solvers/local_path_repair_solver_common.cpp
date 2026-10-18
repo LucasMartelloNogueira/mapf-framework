@@ -5,15 +5,17 @@
 #include "mapf/utils.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <iterator>
-#include <variant>
 #include <optional>
 #include <stdexcept>
 #include <type_traits>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace mapf {
@@ -22,6 +24,91 @@ namespace mapf {
         struct SelectedConflict {
             std::size_t pathIndex;
             std::variant<CellConflict, EdgeConflict> conflict;
+        };
+
+        struct Hash128 {
+            std::uint64_t low = 0;
+            std::uint64_t high = 0;
+
+            bool operator==(const Hash128&) const = default;
+
+            Hash128& operator^=(const Hash128& other) {
+                low ^= other.low;
+                high ^= other.high;
+                return *this;
+            }
+        };
+
+        Hash128 operator^(Hash128 first, const Hash128& second) {
+            return first ^= second;
+        }
+
+        std::uint64_t avalanche64(std::uint64_t value) {
+            value ^= value >> 30;
+            value *= UINT64_C(0xbf58476d1ce4e5b9);
+            value ^= value >> 27;
+            value *= UINT64_C(0x94d049bb133111eb);
+            value ^= value >> 31;
+            return value;
+        }
+
+        Hash128 mix128(
+            std::uint64_t first,
+            std::uint64_t second,
+            std::uint64_t domain
+        ) {
+            const std::uint64_t low = avalanche64(
+                first ^ std::rotl(second, 17) ^ domain
+            );
+            const std::uint64_t high = avalanche64(
+                second ^ std::rotl(first, 41) ^ ~domain ^ low
+            );
+            return {low, high};
+        }
+
+        Hash128 hashPath(const std::list<Cell*>& path, int gridWidth) {
+            constexpr std::uint64_t PATH_STEP_DOMAIN = UINT64_C(0x6f52f24f9b3d4a71);
+            constexpr std::uint64_t PATH_LENGTH_DOMAIN = UINT64_C(0xb8a7d6c519e2430f);
+
+            Hash128 hash;
+            std::uint64_t time = 0;
+            for (const Cell* cell : path) {
+                const std::uint64_t cellId =
+                    static_cast<std::uint64_t>(cell->position.y) *
+                    static_cast<std::uint64_t>(gridWidth) +
+                    static_cast<std::uint64_t>(cell->position.x);
+                hash ^= mix128(time, cellId, PATH_STEP_DOMAIN);
+                ++time;
+            }
+            hash ^= mix128(
+                static_cast<std::uint64_t>(path.size()),
+                0,
+                PATH_LENGTH_DOMAIN
+            );
+            return hash;
+        }
+
+        Hash128 agentContribution(std::size_t agentIndex, const Hash128& pathHash) {
+            constexpr std::uint64_t AGENT_DOMAIN = UINT64_C(0xd37c8e9a41b5620f);
+            const Hash128 indexedLow = mix128(
+                static_cast<std::uint64_t>(agentIndex),
+                pathHash.low,
+                AGENT_DOMAIN
+            );
+            const Hash128 indexedHigh = mix128(
+                static_cast<std::uint64_t>(agentIndex),
+                pathHash.high,
+                ~AGENT_DOMAIN
+            );
+            return indexedLow ^ indexedHigh;
+        }
+
+        struct Hash128Hasher {
+            std::size_t operator()(const Hash128& hash) const {
+                return static_cast<std::size_t>(avalanche64(
+                    hash.low ^ std::rotl(hash.high, 29)
+                ));
+            }
         };
 
         bool isValidStep(Cell* from, Cell* to) {
@@ -130,6 +217,17 @@ namespace mapf {
         result.remainingConflicts = result.initialConflicts;
         result.reservations = solver_utils::buildReservationState(grid, agents, result.paths);
 
+        std::vector<Hash128> pathHashes;
+        pathHashes.reserve(result.paths.size());
+        Hash128 configHash;
+        for (std::size_t i = 0; i < result.paths.size(); ++i) {
+            pathHashes.push_back(hashPath(result.paths[i], instance.getNumCols()));
+            configHash ^= agentContribution(i, pathHashes.back());
+        }
+        std::unordered_set<Hash128, Hash128Hasher> visitedConfigurations;
+        visitedConfigurations.insert(configHash);
+        std::size_t sameConfigCounter = 0;
+
         AStarSippSolver sipp;
 
         while (true) {
@@ -158,6 +256,8 @@ namespace mapf {
             bool repairSuccess = false;
             int repairStartIndex = 0;
             int repairOutcome = AGENT_REPAIR_FAILED;
+            Hash128 acceptedPathHash;
+            Hash128 acceptedConfigHash;
             const int time = conflictTime(selected->conflict);
             if (time > 0 && static_cast<std::size_t>(time) < oldPath.size()) {
                 const std::size_t reconnectIndex = static_cast<std::size_t>(time) +
@@ -202,8 +302,18 @@ namespace mapf {
                             maxNewConflicts)) {
                             continue;
                         }
+                        const Hash128 newPathHash = hashPath(newPath, instance.getNumCols());
+                        const Hash128 candidateHash = configHash ^
+                            agentContribution(activeIndex, pathHashes[activeIndex]) ^
+                            agentContribution(activeIndex, newPathHash);
+                        if (visitedConfigurations.contains(candidateHash)) {
+                            ++sameConfigCounter;
+                            continue;
+                        }
                         repairStartIndex = static_cast<int>(anchor);
                         repairOutcome = currentAnchorIndex;
+                        acceptedPathHash = newPathHash;
+                        acceptedConfigHash = candidateHash;
                         repairSuccess = true;
                         break;
                     }
@@ -218,9 +328,19 @@ namespace mapf {
                         result.reservations.vertex_agents,
                         result.reservations.goal_reservations,
                         newPath, activeAgentId, 0, maxNewConflicts)) {
-                    repairSuccess = true;
-                    repairStartIndex = 0;
-                    repairOutcome = AGENT_FULL_REPLAN;
+                    const Hash128 newPathHash = hashPath(newPath, instance.getNumCols());
+                    const Hash128 candidateHash = configHash ^
+                        agentContribution(activeIndex, pathHashes[activeIndex]) ^
+                        agentContribution(activeIndex, newPathHash);
+                    if (visitedConfigurations.contains(candidateHash)) {
+                        ++sameConfigCounter;
+                    } else {
+                        acceptedPathHash = newPathHash;
+                        acceptedConfigHash = candidateHash;
+                        repairSuccess = true;
+                        repairStartIndex = 0;
+                        repairOutcome = AGENT_FULL_REPLAN;
+                    }
                 }
             }
             if (!repairSuccess) {
@@ -228,10 +348,12 @@ namespace mapf {
                 // destructors run when named return value optimization is absent.
                 repair.rollback();
                 result.agentAnchorsIndex[activeAgentId] = AGENT_REPAIR_FAILED;
+                result.sameConfigCounter = sameConfigCounter;
                 solver_utils::updateResultMetrics(result, agents, false, startedAt);
                 return result;
             }
 
+            visitedConfigurations.insert(acceptedConfigHash);
             repair.insertPath(newPath, activeAgentId);
 
             UpdateSolutionConflictsV2(
@@ -243,8 +365,11 @@ namespace mapf {
             result.paths[activeIndex] = std::move(newPath);
             repair.commit();
             result.agentAnchorsIndex[activeAgentId] = repairOutcome;
+            pathHashes[activeIndex] = acceptedPathHash;
+            configHash = acceptedConfigHash;
         }
 
+        result.sameConfigCounter = sameConfigCounter;
         solver_utils::updateResultMetrics(result, agents, true, startedAt);
         return result;
     }

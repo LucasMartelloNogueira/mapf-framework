@@ -80,7 +80,7 @@ not exposed under the final prefix.
 ## Statistics Schema
 
 ```text
-map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,maxNewConflicts,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts
+map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustice,durationSeconds,time,multithreading,num_threads,solver,local_repair_strategy,maxNewConflicts,sameConfigCounter,num_inital_conflicts,num_resolved_conflicts,num_unresolved_conflicts
 ```
 
 - `num_agents` is the exact non-negative value supplied through `-agents`.
@@ -102,6 +102,9 @@ map,instance_name,num_agents,success,paths_resolved,sumOfCosts,makespan,injustic
   for priority planning and full-path repair.
 - `maxNewConflicts` is the effective non-negative candidate-conflict limit for
   local repair. It is `0` by default and for solvers that reject the flag.
+- `sameConfigCounter` counts local-repair candidates rejected because their
+  128-bit configuration hash had already been visited. It is `0` for the other
+  solvers.
 - `num_inital_conflicts` counts normalized vertex and edge conflicts in the
   initial paths.
 - `num_resolved_conflicts` is the initial conflict count minus the final count,

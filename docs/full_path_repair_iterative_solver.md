@@ -118,7 +118,7 @@ scripts/run_experiment.sh normal -- \
 The solver accepts the four required CLI flags only. Explicit `-threads`,
 `-localRepairStrategy`, and `-maxNewConflicts` are rejected, including values
 that resemble defaults. Stats record one thread, no multithreading,
-`local_repair_strategy=-`, and `maxNewConflicts=0`.
+`local_repair_strategy=-`, `maxNewConflicts=0`, and `sameConfigCounter=0`.
 
 Stats and solution CSVs are written for normal results, including failures.
 Failed full-path runs also write current conflicts; a missing-path failure

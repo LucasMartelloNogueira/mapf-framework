@@ -228,6 +228,7 @@ int runCli(int argc, char* argv[]) {
             run.initialPaths = std::move(result.initialPaths);
             run.solutionPaths = std::move(result.paths);
             run.agentAnchorsIndex = std::move(result.agentAnchorsIndex);
+            run.sameConfigCounter = result.sameConfigCounter;
             run.solver = "LocalPathRepairParallelSolver";
             run.multithreading = true;
             run.numThreads = options.threads.value();
@@ -247,6 +248,7 @@ int runCli(int argc, char* argv[]) {
             run.initialPaths = std::move(result.initialPaths);
             run.solutionPaths = std::move(result.paths);
             run.agentAnchorsIndex = std::move(result.agentAnchorsIndex);
+            run.sameConfigCounter = result.sameConfigCounter;
             run.solver = "LocalPathRepairIterativeSolver";
             run.multithreading = false;
             run.numThreads = 1;

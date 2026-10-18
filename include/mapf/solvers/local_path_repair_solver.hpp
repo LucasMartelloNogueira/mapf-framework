@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <list>
 #include <unordered_map>
 #include <unordered_set>
@@ -45,6 +46,9 @@ namespace mapf {
         // accepted local anchors. Negative values describe an unchanged path,
         // an accepted full replan, or a failed repair using the constants above.
         std::vector<int> agentAnchorsIndex;
+        // Number of candidates rejected because their 128-bit configuration
+        // hash had already been confirmed during this repair.
+        std::size_t sameConfigCounter = 0;
         SolutionConflicts initialConflicts;
         SolutionConflicts remainingConflicts;
         PathReservationState reservations;

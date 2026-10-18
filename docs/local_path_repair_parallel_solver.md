@@ -28,6 +28,8 @@ A zero worker count or negative conflict limit throws `std::invalid_argument`. A
 - paths and path costs in `Instance::getAgents()` order;
 - `agentAnchorsIndex`, indexed by agent ID, with the zero-based ordinal of each
   agent's last accepted local anchor (`-1` if none was accepted);
+- `sameConfigCounter`, the number of candidates rejected because their
+  configuration had already been visited;
 - conflicts detected immediately after unconstrained A* planning;
 - conflicts remaining at return time; and
 - the safe intervals, blocked reverse-edge arrivals, vertex-to-agent membership, and permanent goal arrivals derived from the returned paths.
@@ -132,9 +134,11 @@ Each vertex event is counted once regardless of its number of participants. A
 count exceeding `maxNewConflicts` rejects the candidate and advances to the next
 anchor. The complete fallback is checked from time zero. The default `0` accepts
 only candidates without new conflicts.
+
 Structural checks preserve the endpoints, legal moves/waits and supported time
-range. There is no configuration history or repetition filter. Unusable local
-candidates lead to the next anchor or the complete fallback.
+range. A 128-bit incremental hash tracks every confirmed configuration. A
+candidate whose hash was already visited is rejected, increments
+`sameConfigCounter`, and leads to the next anchor or the complete fallback.
 
 The anchor ordinal starts at zero for each repair attempt and advances for every
 candidate, including rejected candidates. Acceptance updates

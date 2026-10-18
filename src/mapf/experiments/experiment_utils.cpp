@@ -180,7 +180,8 @@ namespace mapf::experiments {
                     !run.multithreading &&
                     run.numThreads == 1 &&
                     !run.localRepair && !run.localRepairStrategy &&
-                    run.maxNewConflicts == 0;
+                    run.maxNewConflicts == 0 &&
+                    run.sameConfigCounter == 0;
             }
 
             if (strategyName(run.localRepairStrategy.value_or(
@@ -403,6 +404,7 @@ namespace mapf::experiments {
             "solver",
             "local_repair_strategy",
             "maxNewConflicts",
+            "sameConfigCounter",
             "num_inital_conflicts",
             "num_resolved_conflicts",
             "num_unresolved_conflicts"
@@ -424,6 +426,7 @@ namespace mapf::experiments {
             run.localRepair ? strategyName(run.localRepairStrategy.value_or(
                 LocalRepairStrategy::RESOLVE_BY_AGENT)) : "-",
             std::to_string(run.maxNewConflicts),
+            std::to_string(run.sameConfigCounter),
             std::to_string(run.metrics.numInitialConflicts),
             std::to_string(run.metrics.numResolvedConflicts),
             std::to_string(run.metrics.numUnresolvedConflicts)

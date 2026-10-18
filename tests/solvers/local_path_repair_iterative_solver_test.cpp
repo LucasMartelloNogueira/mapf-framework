@@ -63,6 +63,9 @@ int main() {
         requireTest(iterativeResult.agentAnchorsIndex == std::vector<int>({0, -1}) &&
             parallelResult.agentAnchorsIndex == iterativeResult.agentAnchorsIndex,
             "Both adapters must record anchor zero only for the repaired agent.");
+        requireTest(iterativeResult.sameConfigCounter == 0 &&
+            parallelResult.sameConfigCounter == 0,
+            "A new crossing configuration was reported as already visited.");
         for (const mapf::Result& metrics : {iterativeResult.metrics, parallelResult.metrics}) {
             requireTest(metrics.numInitialConflicts == 1 && metrics.numResolvedConflicts == 1 &&
                 metrics.numUnresolvedConflicts == 0, "Crossing conflict metrics are incorrect.");
