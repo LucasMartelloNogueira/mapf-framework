@@ -184,6 +184,28 @@ scripts/experiments.sh profile
 
 O script avisa sobre cenários com agentes insuficientes antes de iniciar a bateria.
 
+## Busca do máximo de agentes
+
+[`scripts/find_max_agents.sh`](scripts/find_max_agents.sh) encontra o maior número
+de agentes resolvido por cada combinação dos seis mapas e quatro solvers. Para
+cada combinação, começa com um agente, dobra a quantidade até uma falha e então
+faz uma busca binária entre o último sucesso e a primeira falha. O cenário usado
+é sempre `benchmarks/scenarios/{mapa}/random/{mapa}-random-1.scen`.
+
+```bash
+# Usa build/normal/mapf_app e 8 threads no solver paralelo.
+scripts/find_max_agents.sh
+
+# Usa outro build e outra quantidade de threads no solver paralelo.
+PARALLEL_THREADS=16 scripts/find_max_agents.sh profile
+```
+
+As execuções usam `-saveResults false`, portanto não criam CSVs. Durante a busca,
+o script mostra o mapa, o solver, a quantidade testada, o resultado da tentativa
+e o tempo decorrido. Ao final, imprime a tabela solicitada e o tempo total em
+segundos. Se todos os agentes disponíveis em um cenário forem resolvidos, um
+aviso informa que o valor encontrado está limitado pelo tamanho desse cenário.
+
 ## Resultados
 
 Com `-saveResults true`, que é o valor padrão, cada experimento cria uma pasta
