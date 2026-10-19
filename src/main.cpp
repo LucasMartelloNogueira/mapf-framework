@@ -30,6 +30,7 @@ namespace {
         int maxNewConflicts = 0;
         bool maxNewConflictsProvided = false;
         std::filesystem::path outputFolder;
+        bool saveResults = true;
     };
 
     void printUsage(std::ostream& output, const char* binary) {
@@ -39,14 +40,16 @@ namespace {
             << " [-threads <t>]"
             << " [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>]"
             << " [-maxNewConflicts <n>]"
-            << " [-outputFolder <folder>]\n"
+            << " [-outputFolder <folder>]"
+            << " [-saveResults <true|false>]\n"
             << "Local repair strategy applies to local solvers; default: RESOLVE_BY_AGENT.\n"
             << "Maximum accepted new conflicts applies to local solvers; default: 0.\n"
             << "Output folder is relative to results/ and applies to every solver.\n"
+            << "Result artifact writing applies to every solver; default: true.\n"
             << "Solvers: PriorityPlanningSolver, LocalPathRepairParallelSolver, "
             << "LocalPathRepairIterativeSolver, FullPathRepairIterativeSolver\n"
             << "FullPathRepairIterativeSolver uses fixed ID priority and accepts only "
-            << "-outputFolder as an optional flag.\n";
+            << "-outputFolder and -saveResults as optional flags.\n";
     }
 
     int parseInteger(const std::string& value, const std::string& flag) {
@@ -69,6 +72,16 @@ namespace {
         }
         throw std::invalid_argument(
             "-localRepairStrategy accepts only RESOLVE_BY_AGENT or RESOLVE_BY_TIME.");
+    }
+
+    bool parseBoolean(const std::string& value, const std::string& flag) {
+        if (value == "true") {
+            return true;
+        }
+        if (value == "false") {
+            return false;
+        }
+        throw std::invalid_argument(flag + " accepts only true or false.");
     }
 
     std::filesystem::path parseOutputFolder(const std::string& value) {
@@ -105,6 +118,7 @@ namespace {
         std::optional<std::string> localRepairStrategy;
         std::optional<std::string> maxNewConflicts;
         std::optional<std::string> outputFolder;
+        std::optional<std::string> saveResults;
 
         for (int index = 1; index < argc; index += 2) {
             const std::string flag = argv[index];
@@ -131,6 +145,8 @@ namespace {
                 target = &maxNewConflicts;
             } else if (flag == "-outputFolder") {
                 target = &outputFolder;
+            } else if (flag == "-saveResults") {
+                target = &saveResults;
             } else {
                 throw std::invalid_argument("Unknown flag or positional argument '" + flag + "'.");
             }
@@ -179,6 +195,10 @@ namespace {
 
         if (outputFolder) {
             options.outputFolder = parseOutputFolder(*outputFolder);
+        }
+
+        if (saveResults) {
+            options.saveResults = parseBoolean(*saveResults, "-saveResults");
         }
 
         if (options.solver == "PriorityPlanningSolver") {
@@ -309,20 +329,22 @@ int runCli(int argc, char* argv[]) {
             throw std::invalid_argument("Unknown solver '" + options.solver + "'.");
         }
 
-        try {
-            if (!mapf::experiments::writeExperimentArtifacts(
-                instance,
-                run,
-                experimentTimeSeconds,
-                options.outputFolder
-            )) {
-                std::cerr << "Error: could not write the experiment artifact bundle.\n";
+        if (options.saveResults) {
+            try {
+                if (!mapf::experiments::writeExperimentArtifacts(
+                    instance,
+                    run,
+                    experimentTimeSeconds,
+                    options.outputFolder
+                )) {
+                    std::cerr << "Error: could not write the experiment artifact bundle.\n";
+                    return 1;
+                }
+            } catch (const std::exception& error) {
+                std::cerr << "Error: could not write experiment artifacts: "
+                    << error.what() << '\n';
                 return 1;
             }
-        } catch (const std::exception& error) {
-            std::cerr << "Error: could not write experiment artifacts: "
-                << error.what() << '\n';
-            return 1;
         }
 
         return run.metrics.success ? 0 : 1;

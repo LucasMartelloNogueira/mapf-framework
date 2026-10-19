@@ -196,6 +196,28 @@ int main() {
         std::filesystem::remove_all(outputFolder);
     }
 
+    // Disabling result persistence still runs the solver without creating an output directory.
+    {
+        const std::string outputFolderName = "cli-no-results-" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()
+        );
+        const std::filesystem::path outputFolder =
+            mapf::experiments::repositoryRoot() / "results" / outputFolderName;
+        const std::set<std::filesystem::path> before = resultDirectories();
+        requireTest(
+            invoke({
+                "mapf_app", "-map", mapPath.string(), "-scen", scenarioPath.string(),
+                "-solver", "FullPathRepairIterativeSolver", "-agents", "1",
+                "-outputFolder", outputFolderName, "-saveResults", "false"
+            }) == 0,
+            "CLI run with -saveResults false failed."
+        );
+        requireTest(
+            resultDirectories() == before && !std::filesystem::exists(outputFolder),
+            "-saveResults false created result artifacts."
+        );
+    }
+
     // Both local adapters must carry actual accepted anchor ordinals through the CLI.
     {
         const auto crossingMap = directory / "crossing.map";
@@ -343,6 +365,16 @@ int main() {
                     "-outputFolder", invalidOutputFolder
                 }) == 2,
                 "CLI accepted an output folder outside results/."
+            );
+        }
+        for (const std::string& invalidSaveResults : {"yes", "1", "TRUE"}) {
+            requireTest(
+                invoke({
+                    "mapf_app", "-map", mapPath.string(), "-scen", scenarioPath.string(),
+                    "-solver", "PriorityPlanningSolver", "-agents", "1",
+                    "-saveResults", invalidSaveResults
+                }) == 2,
+                "CLI accepted an invalid -saveResults value."
             );
         }
         requireTest(

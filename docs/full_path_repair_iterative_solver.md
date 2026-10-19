@@ -116,16 +116,17 @@ scripts/run_experiment.sh normal -- \
 ```
 
 The solver accepts the four required CLI flags and the general optional
-`-outputFolder` flag. Explicit `-threads`, `-localRepairStrategy`, and
-`-maxNewConflicts` are rejected, including values that resemble defaults. Stats
-record one thread, no multithreading,
+`-outputFolder` and `-saveResults` flags. Explicit `-threads`,
+`-localRepairStrategy`, and `-maxNewConflicts` are rejected, including values
+that resemble defaults. When result writing is enabled, stats record one thread,
+no multithreading,
 `local_repair_strategy=-`, `maxNewConflicts=0`, and `sameConfigCounter=0`.
 
-Stats and solution CSVs are written for normal results, including failures.
-Failed full-path runs also write current conflicts; a missing-path failure
-without geometric conflicts has a header-only conflicts CSV. See
-[CLI and result artifacts](experiment_cli_and_results.md) for schemas and
-exit codes.
+When result writing is enabled, stats and solution CSVs are written for normal
+results, including failures. Failed full-path runs also write current conflicts;
+a missing-path failure without geometric conflicts has a header-only conflicts
+CSV. See [CLI and result artifacts](experiment_cli_and_results.md) for schemas
+and exit codes.
 
 ## Cost and verification
 
