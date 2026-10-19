@@ -9,6 +9,7 @@
 #include <charconv>
 #include <chrono>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <list>
 #include <optional>
@@ -28,6 +29,7 @@ namespace {
         bool localRepairStrategyProvided = false;
         int maxNewConflicts = 0;
         bool maxNewConflictsProvided = false;
+        std::filesystem::path outputFolder;
     };
 
     void printUsage(std::ostream& output, const char* binary) {
@@ -36,12 +38,15 @@ namespace {
             << " -map <map> -scen <scenario> -solver <solver> -agents <n>"
             << " [-threads <t>]"
             << " [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>]"
-            << " [-maxNewConflicts <n>]\n"
+            << " [-maxNewConflicts <n>]"
+            << " [-outputFolder <folder>]\n"
             << "Local repair strategy applies to local solvers; default: RESOLVE_BY_AGENT.\n"
             << "Maximum accepted new conflicts applies to local solvers; default: 0.\n"
+            << "Output folder is relative to results/ and applies to every solver.\n"
             << "Solvers: PriorityPlanningSolver, LocalPathRepairParallelSolver, "
             << "LocalPathRepairIterativeSolver, FullPathRepairIterativeSolver\n"
-            << "FullPathRepairIterativeSolver uses fixed ID priority and accepts no optional flags.\n";
+            << "FullPathRepairIterativeSolver uses fixed ID priority and accepts only "
+            << "-outputFolder as an optional flag.\n";
     }
 
     int parseInteger(const std::string& value, const std::string& flag) {
@@ -66,6 +71,31 @@ namespace {
             "-localRepairStrategy accepts only RESOLVE_BY_AGENT or RESOLVE_BY_TIME.");
     }
 
+    std::filesystem::path parseOutputFolder(const std::string& value) {
+        const std::filesystem::path outputFolder(value);
+        if (value.empty() || outputFolder.is_absolute()) {
+            throw std::invalid_argument(
+                "-outputFolder must be a non-empty path relative to results/."
+            );
+        }
+
+        for (const std::filesystem::path& component : outputFolder) {
+            if (component == "..") {
+                throw std::invalid_argument(
+                    "-outputFolder cannot contain '..'."
+                );
+            }
+        }
+
+        const std::filesystem::path normalized = outputFolder.lexically_normal();
+        if (normalized.empty() || normalized == ".") {
+            throw std::invalid_argument(
+                "-outputFolder must name a folder inside results/."
+            );
+        }
+        return normalized;
+    }
+
     CliOptions parseOptions(int argc, char* argv[]) {
         std::optional<std::string> map;
         std::optional<std::string> scenario;
@@ -74,6 +104,7 @@ namespace {
         std::optional<std::string> threads;
         std::optional<std::string> localRepairStrategy;
         std::optional<std::string> maxNewConflicts;
+        std::optional<std::string> outputFolder;
 
         for (int index = 1; index < argc; index += 2) {
             const std::string flag = argv[index];
@@ -98,6 +129,8 @@ namespace {
                 target = &localRepairStrategy;
             } else if (flag == "-maxNewConflicts") {
                 target = &maxNewConflicts;
+            } else if (flag == "-outputFolder") {
+                target = &outputFolder;
             } else {
                 throw std::invalid_argument("Unknown flag or positional argument '" + flag + "'.");
             }
@@ -142,6 +175,10 @@ namespace {
                 throw std::invalid_argument("-maxNewConflicts must be non-negative.");
             }
             options.maxNewConflictsProvided = true;
+        }
+
+        if (outputFolder) {
+            options.outputFolder = parseOutputFolder(*outputFolder);
         }
 
         if (options.solver == "PriorityPlanningSolver") {
@@ -276,7 +313,8 @@ int runCli(int argc, char* argv[]) {
             if (!mapf::experiments::writeExperimentArtifacts(
                 instance,
                 run,
-                experimentTimeSeconds
+                experimentTimeSeconds,
+                options.outputFolder
             )) {
                 std::cerr << "Error: could not write the experiment artifact bundle.\n";
                 return 1;

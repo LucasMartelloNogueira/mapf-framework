@@ -38,7 +38,7 @@ solução de problemas estão em
 Formato geral:
 
 ```text
-scripts/run_experiment.sh <normal|profile> -- -map <mapa> -scen <cenario> -solver <solver> -agents <n> [-threads <t>] [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>] [-maxNewConflicts <n>]
+scripts/run_experiment.sh <normal|profile> -- -map <mapa> -scen <cenario> -solver <solver> -agents <n> [-threads <t>] [-localRepairStrategy <RESOLVE_BY_AGENT|RESOLVE_BY_TIME>] [-maxNewConflicts <n>] [-outputFolder <pasta>]
 ```
 
 ### Argumentos da CLI
@@ -57,6 +57,7 @@ argumentos opcionais, conforme as regras de cada solver.
 | `-threads` | Número de threads usadas para encontrar os caminhos iniciais em `LocalPathRepairParallelSolver`. | Inteiro maior que `0`. Obrigatório para `LocalPathRepairParallelSolver` e não aceito pelos outros solvers. |
 | `-localRepairStrategy` | Estratégia de resolução de conflitos no reparo local: `RESOLVE_BY_AGENT` prioriza a ordem dos agentes; `RESOLVE_BY_TIME` prioriza os conflitos pelo instante em que ocorrem. | `RESOLVE_BY_AGENT` ou `RESOLVE_BY_TIME`. Opcional, com padrão `RESOLVE_BY_AGENT`. Aceito somente por `LocalPathRepairParallelSolver` e `LocalPathRepairIterativeSolver`. |
 | `-maxNewConflicts` | Quantidade máxima de novos conflitos que um caminho gerado pelo reparo local pode introduzir e ainda ser aceito. | Inteiro maior ou igual a `0`. Opcional, com padrão `0`. Aceito somente por `LocalPathRepairParallelSolver` e `LocalPathRepairIterativeSolver`. |
+| `-outputFolder` | Pasta, dentro de `results/`, na qual será criada a pasta própria da execução. | Opcional e aceito por todos os solvers. Deve ser um caminho relativo não vazio, sem `..`; quando omitido, a pasta da execução é criada diretamente em `results/`. |
 
 Nos solvers de reparo local, cada reparo combina o prefixo preservado, uma ponte
 SIPP e o restante do caminho antigo. Os conflitos do sufixo são atualizados para
@@ -80,8 +81,10 @@ seus caminhos completos com SIPP em ordem crescente de ID, inserindo cada novo
 caminho antes da próxima busca. Se algum participante falhar, descarta as
 alterações daquele grupo e retorna o último estado confirmado. Usa uma única
 construção inicial da tabela de reservas e atualizações incrementais durante o
-reparo. Aceita somente os quatro argumentos obrigatórios; as três flags opcionais
-são rejeitadas mesmo quando recebem valores iguais aos padrões dos outros solvers.
+reparo. Das opções específicas dos solvers, aceita somente os quatro argumentos
+obrigatórios; `-threads`, `-localRepairStrategy` e `-maxNewConflicts` são rejeitadas
+mesmo quando recebem valores iguais aos padrões dos outros solvers. A opção geral
+`-outputFolder` é aceita normalmente.
 
 O script `scripts/run_experiment.sh` também recebe:
 
@@ -101,7 +104,8 @@ scripts/run_experiment.sh normal -- \
   -map benchmarks/maps/empty-8-8.map \
   -scen benchmarks/scenarios/empty-8-8/random/empty-8-8-random-1.scen \
   -solver PriorityPlanningSolver \
-  -agents 3
+  -agents 3 \
+  -outputFolder teste1
 ```
 
 Reparo local com caminhos iniciais calculados em paralelo:
@@ -181,10 +185,20 @@ O script avisa sobre cenários com agentes insuficientes antes de iniciar a bate
 
 ## Resultados
 
-Cada experimento cria uma pasta própria:
+Cada experimento cria uma pasta própria. Sem `-outputFolder`, ela fica diretamente
+em `results/`:
 
 ```text
 results/{git_branch}_{timestamp}/
+├── {git_branch}_{timestamp}_stats.csv
+├── {git_branch}_{timestamp}_solution.csv
+└── {git_branch}_{timestamp}_conflicts.csv
+```
+
+Com `-outputFolder teste1`, a mesma pasta fica agrupada um nível abaixo:
+
+```text
+results/teste1/{git_branch}_{timestamp}/
 ├── {git_branch}_{timestamp}_stats.csv
 ├── {git_branch}_{timestamp}_solution.csv
 └── {git_branch}_{timestamp}_conflicts.csv

@@ -56,7 +56,9 @@ namespace mapf::experiments {
 
     std::filesystem::path repositoryRoot();
     std::filesystem::path makeResultPath();
-    ExperimentOutputPaths makeExperimentOutputPaths();
+    ExperimentOutputPaths makeExperimentOutputPaths(
+        const std::filesystem::path& outputFolder = {}
+    );
     double elapsedSeconds(std::chrono::steady_clock::time_point startedAt);
 
     std::vector<ConflictRecord> normalizeConflicts(
@@ -67,7 +69,8 @@ namespace mapf::experiments {
     bool writeExperimentArtifacts(
         const Instance& instance,
         const ExperimentRunResult& run,
-        double experimentTimeSeconds
+        double experimentTimeSeconds,
+        const std::filesystem::path& outputFolder = {}
     );
 
     bool writeExperimentResult(

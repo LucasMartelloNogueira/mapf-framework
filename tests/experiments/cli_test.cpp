@@ -159,6 +159,43 @@ int main() {
     );
     requireSuccessfulRun(mapPath, scenarioPath, "FullPathRepairIterativeSolver", false);
 
+    // A shared output folder groups the generated run directory below results/ for every solver.
+    {
+        const std::string outputFolderName = "cli-output-" + std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count()
+        );
+        const std::filesystem::path outputFolder =
+            mapf::experiments::repositoryRoot() / "results" / outputFolderName;
+        requireTest(
+            invoke({
+                "mapf_app", "-map", mapPath.string(), "-scen", scenarioPath.string(),
+                "-solver", "FullPathRepairIterativeSolver", "-agents", "1",
+                "-outputFolder", outputFolderName
+            }) == 0,
+            "CLI run with -outputFolder failed."
+        );
+
+        std::vector<std::filesystem::path> runDirectories;
+        for (const std::filesystem::directory_entry& entry :
+            std::filesystem::directory_iterator(outputFolder)) {
+            if (entry.is_directory()) {
+                runDirectories.push_back(entry.path());
+            }
+        }
+        requireTest(
+            runDirectories.size() == 1,
+            "-outputFolder did not contain exactly one run directory."
+        );
+        const std::filesystem::path runDirectory = runDirectories.front();
+        const std::string prefix = runDirectory.filename().string();
+        requireTest(
+            std::filesystem::exists(runDirectory / (prefix + "_stats.csv")) &&
+                std::filesystem::exists(runDirectory / (prefix + "_solution.csv")),
+            "-outputFolder run artifacts were not written below the grouped directory."
+        );
+        std::filesystem::remove_all(outputFolder);
+    }
+
     // Both local adapters must carry actual accepted anchor ordinals through the CLI.
     {
         const auto crossingMap = directory / "crossing.map";
@@ -293,6 +330,20 @@ int main() {
                 "-scen", scenarioPath.string(), "-solver", "FullPathRepairIterativeSolver", "-agents", "1"};
             arguments.insert(arguments.end(), option.begin(), option.end());
             requireTest(invoke(std::move(arguments)) == 2, "Full-path solver accepted an optional flag.");
+        }
+        for (const std::string& invalidOutputFolder : {
+            std::string(),
+            std::string("../outside-results"),
+            directory.string()
+        }) {
+            requireTest(
+                invoke({
+                    "mapf_app", "-map", mapPath.string(), "-scen", scenarioPath.string(),
+                    "-solver", "PriorityPlanningSolver", "-agents", "1",
+                    "-outputFolder", invalidOutputFolder
+                }) == 2,
+                "CLI accepted an output folder outside results/."
+            );
         }
         requireTest(
             invoke({

@@ -96,6 +96,8 @@ int main() {
             mapf::experiments::makeExperimentOutputPaths();
         const mapf::experiments::ExperimentOutputPaths second =
             mapf::experiments::makeExperimentOutputPaths();
+        const mapf::experiments::ExperimentOutputPaths grouped =
+            mapf::experiments::makeExperimentOutputPaths("suite/nested");
         requireTest(first.prefix != second.prefix, "Output prefixes collided.");
         requireTest(
             first.stats.parent_path() == first.directory &&
@@ -106,6 +108,24 @@ int main() {
         requireTest(
             first.stats.filename() == first.prefix + "_stats.csv",
             "Stats filename does not repeat the run prefix."
+        );
+        requireTest(
+            grouped.directory.parent_path() ==
+                mapf::experiments::repositoryRoot() / "results" / "suite" / "nested",
+            "Output folder was not inserted between results/ and the run directory."
+        );
+
+        bool rejectedTraversal = false;
+        try {
+            static_cast<void>(
+                mapf::experiments::makeExperimentOutputPaths("../outside-results")
+            );
+        } catch (const std::invalid_argument&) {
+            rejectedTraversal = true;
+        }
+        requireTest(
+            rejectedTraversal,
+            "Output path traversal was not rejected."
         );
     }
 

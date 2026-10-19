@@ -215,6 +215,36 @@ namespace mapf::experiments {
             std::error_code ignored;
             std::filesystem::remove_all(directory, ignored);
         }
+
+        std::filesystem::path resultsDirectoryFor(
+            const std::filesystem::path& outputFolder
+        ) {
+            const std::filesystem::path resultsDirectory =
+                repositoryRoot() / "results";
+            if (outputFolder.empty()) {
+                return resultsDirectory;
+            }
+            if (outputFolder.is_absolute()) {
+                throw std::invalid_argument(
+                    "Output folder must be relative to results/."
+                );
+            }
+            for (const std::filesystem::path& component : outputFolder) {
+                if (component == "..") {
+                    throw std::invalid_argument(
+                        "Output folder cannot contain '..'."
+                    );
+                }
+            }
+
+            const std::filesystem::path normalized = outputFolder.lexically_normal();
+            if (normalized.empty() || normalized == ".") {
+                throw std::invalid_argument(
+                    "Output folder must name a folder inside results/."
+                );
+            }
+            return resultsDirectory / normalized;
+        }
     }
 
     std::filesystem::path repositoryRoot() {
@@ -229,10 +259,13 @@ namespace mapf::experiments {
             (currentBranchName() + "_" + std::to_string(timestamp) + "_results.csv");
     }
 
-    ExperimentOutputPaths makeExperimentOutputPaths() {
+    ExperimentOutputPaths makeExperimentOutputPaths(
+        const std::filesystem::path& outputFolder
+    ) {
         const std::string prefix = currentBranchName() + "_" +
             std::to_string(nextTimestampMilliseconds());
-        const std::filesystem::path directory = repositoryRoot() / "results" / prefix;
+        const std::filesystem::path directory =
+            resultsDirectoryFor(outputFolder) / prefix;
 
         return {
             .prefix = prefix,
@@ -301,7 +334,8 @@ namespace mapf::experiments {
     bool writeExperimentArtifacts(
         const Instance& instance,
         const ExperimentRunResult& run,
-        double experimentTimeSeconds
+        double experimentTimeSeconds,
+        const std::filesystem::path& outputFolder
     ) {
         const std::vector<Agent>& agents = instance.getAgents();
         if (
@@ -451,7 +485,8 @@ namespace mapf::experiments {
             });
         }
 
-        const ExperimentOutputPaths outputPaths = makeExperimentOutputPaths();
+        const ExperimentOutputPaths outputPaths =
+            makeExperimentOutputPaths(outputFolder);
         const std::filesystem::path resultsDirectory = outputPaths.directory.parent_path();
         const std::filesystem::path temporaryDirectory =
             resultsDirectory / ("." + outputPaths.prefix + ".tmp");
