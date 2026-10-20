@@ -206,6 +206,31 @@ e o tempo decorrido. Ao final, imprime a tabela solicitada e o tempo total em
 segundos. Se todos os agentes disponíveis em um cenário forem resolvidos, um
 aviso informa que o valor encontrado está limitado pelo tamanho desse cenário.
 
+## Busca do primeiro `maxNewConflicts` ruim
+
+[`scripts/first_bad_max_new_conflict_value.sh`](scripts/first_bad_max_new_conflict_value.sh)
+executa o `LocalPathRepairIterativeSolver` para as combinações configuradas de
+mapa e quantidade de agentes. Para cada combinação, começa com
+`-maxNewConflicts 0` e incrementa o valor até encontrar o primeiro `k` no qual
+`sumOfCosts`, `makespan`, `injustice` e `durationSeconds` são todos estritamente
+maiores que na execução com `k - 1`. Para evitar uma busca indefinida, se
+`sumOfCosts`, `makespan` e `injustice` permanecerem iguais por 10 iterações
+consecutivas, o script encerra essa combinação, registra `k - 10` como resultado
+e continua com a próxima quantidade de agentes.
+
+```bash
+# Usa build/normal/mapf_app.
+scripts/first_bad_max_new_conflict_value.sh
+
+# Opcional: usa build/profile/mapf_app.
+scripts/first_bad_max_new_conflict_value.sh profile
+```
+
+O script mostra o progresso e o tempo decorrido a cada execução. Os CSVs são
+agrupados em `results/first_bad_max_new_conflict_value_{timestamp_seconds}/`.
+Ao final, ele imprime uma tabela com uma linha por mapa, três colunas para as
+quantidades de agentes e o tempo total em segundos.
+
 ## Resultados
 
 Com `-saveResults true`, que é o valor padrão, cada experimento cria uma pasta
